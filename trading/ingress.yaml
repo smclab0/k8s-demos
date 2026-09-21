@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading-dashboard
+  namespace: apps
+  annotations:
+    # Public ACME (Let's Encrypt/ZeroSSL) can't validate a hostname that
+    # resolves to a private RFC1918 address -- using the cluster's internal
+    # CA instead, same pattern every other app here already uses.
+    cert-manager.io/cluster-issuer: lenny-internal-ca-issuer
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: trading.172.16.100.12.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: trading-dashboard-lb
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - trading.172.16.100.12.sslip.io
+      secretName: trading-dashboard-tls

@@ -1,0 +1,417 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trading-engine-script
+  namespace: apps
+data:
+  engine.py: |
+    import json
+    import random
+    import threading
+    import time
+    import redis
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import urlparse, parse_qs
+
+    r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True)
+    STARTING_CASH = 100000.0
+
+    # Live-tunable settings, read by the market-open CronJob (bot counts per
+    # phase) and by each hft-bot pod (order rate) -- editable via the
+    # dashboard's /admin page instead of requiring a redeploy.
+    CONFIG_DEFAULTS = {
+        "open_bots": 30,
+        "quiet_bots": 2,
+        "closed_bots": 0,
+        "bot_rate": 50,
+        "open_minutes": 8,
+        "quiet_minutes": 3,
+        "closed_minutes": 3,
+    }
+    CONFIG_BOUNDS = {  # (min, max) inclusive, applied on write
+        "open_bots": (0, 200),
+        "quiet_bots": (0, 200),
+        "closed_bots": (0, 200),
+        "bot_rate": (1, 500),
+        # The market-open CronJob's own schedule (how often a new cycle starts)
+        # is a static Kubernetes field, not something this config can rewrite --
+        # so these durations can drift from that schedule's cadence. Bounded to
+        # a range that keeps a full cycle in the right ballpark of it regardless.
+        "open_minutes": (1, 60),
+        "quiet_minutes": (1, 60),
+        "closed_minutes": (1, 60),
+    }
+
+    def get_config():
+        try:
+            stored = r.hgetall("config")
+        except Exception:
+            stored = {}
+        return {k: int(stored.get(k, v)) for k, v in CONFIG_DEFAULTS.items()}
+
+    def set_config(updates):
+        clean = {}
+        for key, bounds in CONFIG_BOUNDS.items():
+            if key in updates:
+                try:
+                    val = int(updates[key])
+                except (TypeError, ValueError):
+                    continue
+                lo, hi = bounds
+                clean[key] = max(lo, min(hi, val))
+        if clean:
+            r.hset("config", mapping=clean)
+        return get_config()
+
+    # Phase boundaries now come from live config (open/quiet/closed_minutes,
+    # editable via /admin) instead of hardcoded seconds, so trading-engine,
+    # price-feed, and the dashboard's timeline all have to independently derive
+    # the same boundaries from the same source rather than duplicating numbers.
+    def is_market_closed():
+        try:
+            cfg = get_config()
+            open_end = cfg["open_minutes"] * 60
+            quiet_end = open_end + cfg["quiet_minutes"] * 60
+            closed_end = quiet_end + cfg["closed_minutes"] * 60
+            for raw in r.lrange("events", 0, 19):
+                event = json.loads(raw)
+                if event.get("type") == "market_open":
+                    elapsed = time.time() - event["epoch"]
+                    return quiet_end <= elapsed < closed_end
+        except Exception:
+            pass
+        return False
+
+    # Executes atomically inside Redis (single-threaded script execution) so
+    # concurrent orders can't race each other's read-modify-write of cash/positions.
+    ORDER_SCRIPT = r.register_script("""
+    local cash_key = KEYS[1]
+    local positions_key = KEYS[2]
+    local prices_key = KEYS[3]
+    local trades_key = KEYS[4]
+    local source_trades_key = KEYS[5]
+    local symbol = ARGV[1]
+    local side = ARGV[2]
+    local qty = tonumber(ARGV[3])
+    local starting_cash = tonumber(ARGV[4])
+    local ts = ARGV[5]
+    local source = ARGV[6]
+
+    if qty == nil or qty <= 0 then
+      return cjson.encode({error = "qty must be positive"})
+    end
+
+    local price_str = redis.call('HGET', prices_key, symbol)
+    if not price_str then
+      return cjson.encode({error = "unknown symbol " .. symbol})
+    end
+    local price = tonumber(price_str)
+
+    local cash_str = redis.call('GET', cash_key)
+    local cash
+    if cash_str == false then
+      cash = starting_cash
+    else
+      cash = tonumber(cash_str)
+    end
+
+    local cost = qty * price
+
+    if side == 'buy' then
+      if cost > cash then
+        return cjson.encode({error = "insufficient cash"})
+      end
+      cash = cash - cost
+      redis.call('SET', cash_key, cash)
+      redis.call('HINCRBYFLOAT', positions_key, symbol, qty)
+    elseif side == 'sell' then
+      local held_str = redis.call('HGET', positions_key, symbol)
+      local held = 0
+      if held_str then held = tonumber(held_str) end
+      if qty > held then
+        return cjson.encode({error = "insufficient position"})
+      end
+      cash = cash + cost
+      redis.call('SET', cash_key, cash)
+      redis.call('HINCRBYFLOAT', positions_key, symbol, -qty)
+    else
+      return cjson.encode({error = "side must be buy or sell"})
+    end
+
+    local trade = cjson.encode({symbol=symbol, side=side, qty=qty, price=price, time=ts, source=source})
+    redis.call('LPUSH', trades_key, trade)
+    redis.call('LTRIM', trades_key, 0, 199)
+    redis.call('LPUSH', source_trades_key, trade)
+    redis.call('LTRIM', source_trades_key, 0, 149)
+
+    return cjson.encode({ok=true, symbol=symbol, side=side, qty=qty, price=price})
+    """)
+
+    # Each source ("user" or "bot") gets its own cash/positions pool, so the
+    # human player and the hft-bot swarm trade the same market independently
+    # rather than sharing (and colliding over) one pot.
+    def ensure_init(source="user"):
+        key = f"portfolio:cash:{source}"
+        if not r.exists(key):
+            r.set(key, STARTING_CASH)
+
+    def get_price(sym):
+        v = r.hget("prices", sym)
+        return float(v) if v else None
+
+    def get_portfolio(source="user"):
+        cash = float(r.get(f"portfolio:cash:{source}") or STARTING_CASH)
+        positions = r.hgetall(f"portfolio:positions:{source}") or {}
+        value = cash
+        detail = {}
+        for sym, qty in positions.items():
+            qty = float(qty)
+            price = get_price(sym) or 0
+            mv = qty * price
+            value += mv
+            detail[sym] = {"qty": qty, "price": price, "market_value": round(mv, 2)}
+        return {"cash": round(cash, 2), "positions": detail, "total_value": round(value, 2)}
+
+    def do_reset(source):
+        ensure_init(source)
+        r.set(f"portfolio:cash:{source}", STARTING_CASH)
+        r.delete(f"portfolio:positions:{source}")
+        r.delete(f"trades:{source}")
+        all_trades = r.lrange("trades", 0, -1)
+        kept = [t for t in all_trades if json.loads(t).get("source") != source]
+        if len(kept) != len(all_trades):
+            pipe = r.pipeline()
+            pipe.delete("trades")
+            if kept:
+                pipe.rpush("trades", *kept)
+            pipe.execute()
+        event = {"type": "reset", "source": source, "time": time.strftime("%H:%M:%S"), "epoch": time.time()}
+        r.lpush("events", json.dumps(event))
+        r.ltrim("events", 0, 19)
+        return {"ok": True, "portfolio": get_portfolio(source)}
+
+    def do_market_open():
+        # Opening-bell jolt: a bigger one-off swing per ticker than the price
+        # feed's normal +/-1% steps, simulating the volatility right at market open.
+        prices = r.hgetall("prices")
+        for sym, price in prices.items():
+            price = float(price)
+            pct = random.uniform(-0.06, 0.06)
+            new_price = max(0.01, round(price * (1 + pct), 2))
+            r.hset("prices", sym, new_price)
+        event = {"type": "market_open", "time": time.strftime("%H:%M:%S"), "epoch": time.time()}
+        r.lpush("events", json.dumps(event))
+        r.ltrim("events", 0, 19)
+
+        # Execute any orders placed while the market was closed, oldest first,
+        # at whatever price resulted from the opening jolt above.
+        processed = 0
+        while True:
+            raw = r.lpop("pending_orders")
+            if raw is None:
+                break
+            order = json.loads(raw)
+            try:
+                ensure_init(order["source"])
+                ORDER_SCRIPT(
+                    keys=[f"portfolio:cash:{order['source']}", f"portfolio:positions:{order['source']}",
+                          "prices", "trades", f"trades:{order['source']}"],
+                    args=[order["symbol"], order["side"], order["qty"], STARTING_CASH,
+                          time.strftime("%H:%M:%S"), order["source"]],
+                )
+            except Exception:
+                pass
+            processed += 1
+        event["queued_orders_processed"] = processed
+        return event
+
+    def do_market_close():
+        event = {"type": "market_close", "time": time.strftime("%H:%M:%S"), "epoch": time.time()}
+        r.lpush("events", json.dumps(event))
+        r.ltrim("events", 0, 19)
+        return event
+
+    class Handler(BaseHTTPRequestHandler):
+        # BaseHTTPRequestHandler defaults to HTTP/1.0 (Connection: close on every
+        # response), which silently defeats any client-side keep-alive. Every
+        # response already sets Content-Length (required for HTTP/1.1 persistent
+        # connections without chunked encoding), so this is safe to enable.
+        protocol_version = "HTTP/1.1"
+
+        def _json(self, code, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            path = parsed.path
+            qs = parse_qs(parsed.query)
+            source = qs.get("source", ["user"])[0]
+            ensure_init(source)
+            if path == "/portfolio":
+                self._json(200, get_portfolio(source))
+            elif path == "/trades":
+                # Without ?source=, returns the shared firehose (all traders, short retention).
+                # With ?source=user (or bot), returns that source's own dedicated, longer-retained history.
+                if "source" in qs:
+                    limit = int(qs.get("limit", ["49"])[0])
+                    trades = [json.loads(t) for t in r.lrange(f"trades:{source}", 0, limit)]
+                else:
+                    trades = [json.loads(t) for t in r.lrange("trades", 0, 19)]
+                self._json(200, trades)
+            elif path == "/prices":
+                self._json(200, r.hgetall("prices"))
+            elif path == "/events":
+                events = [json.loads(e) for e in r.lrange("events", 0, 19)]
+                self._json(200, events)
+            elif path == "/pending":
+                orders = [json.loads(o) for o in r.lrange("pending_orders", 0, -1)]
+                if "source" in qs:
+                    orders = [o for o in orders if o.get("source") == source]
+                self._json(200, orders)
+            elif path == "/config":
+                self._json(200, get_config())
+            else:
+                self._json(404, {"error": "not found"})
+
+        def do_POST(self):
+            if self.path == "/market-open":
+                self._json(200, do_market_open())
+                return
+            if self.path == "/market-close":
+                self._json(200, do_market_close())
+                return
+            if self.path == "/config":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    data = json.loads(self.rfile.read(length)) if length else {}
+                except Exception:
+                    data = {}
+                self._json(200, set_config(data))
+                return
+            if self.path == "/reset":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    data = json.loads(self.rfile.read(length)) if length else {}
+                except Exception:
+                    data = {}
+                source = str(data.get("source", "user"))
+                self._json(200, do_reset(source))
+                return
+            if self.path != "/order":
+                self._json(404, {"error": "not found"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(length))
+                symbol = str(data["symbol"]).upper()
+                side = str(data["side"]).lower()
+                qty = float(data["qty"])
+                source = str(data.get("source", "user"))
+                ensure_init(source)
+
+                if qty <= 0:
+                    self._json(400, {"error": "qty must be positive"})
+                    return
+                if side not in ("buy", "sell"):
+                    self._json(400, {"error": "side must be buy or sell"})
+                    return
+                if not r.hexists("prices", symbol):
+                    self._json(400, {"error": f"unknown symbol {symbol}"})
+                    return
+
+                if is_market_closed():
+                    # Cash/position sufficiency can't be checked meaningfully until
+                    # the price that applies at open is known, so that's deferred to
+                    # execution time in do_market_open's queue drain, same as a real
+                    # after-hours order can still fail on the open.
+                    order = {"symbol": symbol, "side": side, "qty": qty, "source": source,
+                              "queued_at": time.strftime("%H:%M:%S")}
+                    r.rpush("pending_orders", json.dumps(order))
+                    self._json(200, {"ok": True, "queued": True,
+                                      "message": "market is closed — order queued for next open"})
+                    return
+
+                result = json.loads(ORDER_SCRIPT(
+                    keys=[f"portfolio:cash:{source}", f"portfolio:positions:{source}", "prices", "trades", f"trades:{source}"],
+                    args=[symbol, side, qty, STARTING_CASH, time.strftime("%H:%M:%S"), source],
+                ))
+                if "error" in result:
+                    self._json(400, result)
+                    return
+                self._json(200, {"ok": True, "trade": result, "portfolio": get_portfolio(source)})
+            except Exception as e:
+                self._json(400, {"error": str(e)})
+
+        def log_message(self, fmt, *args):
+            pass
+
+    def portfolio_history_loop():
+        while True:
+            try:
+                ensure_init()
+                value = get_portfolio()["total_value"]
+                r.rpush("history:portfolio", json.dumps([time.time(), value]))
+                r.ltrim("history:portfolio", -300, -1)
+            except Exception:
+                pass
+            time.sleep(2)
+
+    threading.Thread(target=portfolio_history_loop, daemon=True).start()
+
+    ThreadingHTTPServer(("0.0.0.0", 80), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-engine
+  namespace: apps
+  labels:
+    app: trading-engine
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: trading-engine
+  template:
+    metadata:
+      labels:
+        app: trading-engine
+    spec:
+      containers:
+        - name: trading-engine
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/engine.py"]
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: trading-engine-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trading-engine
+  namespace: apps
+spec:
+  type: ClusterIP
+  selector:
+    app: trading-engine
+  ports:
+    - port: 80
+      targetPort: 80

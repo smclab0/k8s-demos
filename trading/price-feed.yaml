@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: price-feed-script
+  namespace: apps
+data:
+  price_feed.py: |
+    import json
+    import random
+    import string
+    import time
+    import redis
+
+    r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True)
+
+    # AAA, BBB, CCC, ... ZZZ -- one ticker per letter, spread across a wide price range.
+    TICKERS = {f"{c}{c}{c}": round(10 + i * 19, 2) for i, c in enumerate(string.ascii_uppercase)}
+
+    for sym, price in TICKERS.items():
+        if not r.hexists("prices", sym):
+            r.hset("prices", sym, price)
+
+    # Phase durations are live-tunable via the dashboard's /admin page
+    # (stored in Redis, defaults below), read fresh on every check so a
+    # config change takes effect without restarting this pod.
+    PHASE_DEFAULTS = {"open_minutes": 8, "quiet_minutes": 3, "closed_minutes": 3}
+
+    def is_market_closed():
+        try:
+            cfg = r.hgetall("config")
+            open_end = int(cfg.get("open_minutes", PHASE_DEFAULTS["open_minutes"])) * 60
+            quiet_end = open_end + int(cfg.get("quiet_minutes", PHASE_DEFAULTS["quiet_minutes"])) * 60
+            closed_end = quiet_end + int(cfg.get("closed_minutes", PHASE_DEFAULTS["closed_minutes"])) * 60
+            for raw in r.lrange("events", 0, 19):
+                event = json.loads(raw)
+                if event.get("type") == "market_open":
+                    elapsed = time.time() - event["epoch"]
+                    return quiet_end <= elapsed < closed_end
+        except Exception:
+            pass
+        return False  # no session recorded yet -- default to active
+
+    print("price feed started", flush=True)
+    while True:
+        now = time.time()
+        if not is_market_closed():
+            pipe = r.pipeline()
+            for sym in TICKERS:
+                cur = float(r.hget("prices", sym))
+                pct = random.uniform(-0.01, 0.01)
+                new_price = round(max(0.01, cur * (1 + pct)), 2)
+                r.hset("prices", sym, new_price)
+                pipe.rpush(f"history:{sym}", json.dumps([now, new_price]))
+                pipe.ltrim(f"history:{sym}", -300, -1)
+            pipe.execute()
+            r.set("prices:updated", now)
+        time.sleep(2)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: price-feed
+  namespace: apps
+  labels:
+    app: price-feed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: price-feed
+  template:
+    metadata:
+      labels:
+        app: price-feed
+    spec:
+      containers:
+        - name: price-feed
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/price_feed.py"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: price-feed-script

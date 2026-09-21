@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: trading-dashboard
+  namespace: apps
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: trading-dashboard-read-bots
+  namespace: apps
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["hft-bot", "trading-engine"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: trading-dashboard-read-bots
+  namespace: apps
+subjects:
+  - kind: ServiceAccount
+    name: trading-dashboard
+    namespace: apps
+roleRef:
+  kind: Role
+  name: trading-dashboard-read-bots
+  apiGroup: rbac.authorization.k8s.io
+---
+# Nodes are cluster-scoped, so listing them needs a ClusterRole even though
+# this ServiceAccount otherwise only touches things in the apps namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: trading-dashboard-read-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: trading-dashboard-read-nodes
+subjects:
+  - kind: ServiceAccount
+    name: trading-dashboard
+    namespace: apps
+roleRef:
+  kind: ClusterRole
+  name: trading-dashboard-read-nodes
+  apiGroup: rbac.authorization.k8s.io

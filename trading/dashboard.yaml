@@ -1,0 +1,887 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trading-dashboard-script
+  namespace: apps
+data:
+  dashboard.py: |
+    import json
+    import socket
+    import ssl
+    import time
+    import urllib.request
+    import urllib.error
+    import redis
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True,
+                     socket_timeout=2, socket_connect_timeout=2)
+    ENGINE = "http://trading-engine.apps.svc.cluster.local"
+
+    K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    K8S_NAMESPACE = "apps"
+
+    # Every order (accepted or rejected) runs the ORDER_SCRIPT via EVALSHA, so its
+    # call-count delta between polls is a direct measure of order throughput.
+    _orders_rate_state = {"calls": None, "time": None}
+
+    def get_orders_per_sec():
+        try:
+            stats = r.info("commandstats")
+            calls = stats.get("cmdstat_evalsha", {}).get("calls", 0)
+            now = time.time()
+            prev_calls, prev_time = _orders_rate_state["calls"], _orders_rate_state["time"]
+            rate = None
+            if prev_calls is not None and now > prev_time:
+                rate = max(0.0, (calls - prev_calls) / (now - prev_time))
+            _orders_rate_state["calls"] = calls
+            _orders_rate_state["time"] = now
+            return round(rate, 1) if rate is not None else None
+        except Exception:
+            return None
+
+    def k8s_api_get(path):
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(f"https://kubernetes.default.svc{path}", headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, context=ctx, timeout=2) as resp:
+            return json.load(resp)
+
+    def get_bot_count():
+        try:
+            data = k8s_api_get(f"/apis/apps/v1/namespaces/{K8S_NAMESPACE}/deployments/hft-bot")
+            status = data.get("status", {})
+            return {"desired": status.get("replicas", 0), "ready": status.get("readyReplicas", 0)}
+        except Exception:
+            return {"desired": None, "ready": None}
+
+    def get_engine_count():
+        try:
+            data = k8s_api_get(f"/apis/apps/v1/namespaces/{K8S_NAMESPACE}/deployments/trading-engine")
+            status = data.get("status", {})
+            return {"desired": status.get("replicas", 0), "ready": status.get("readyReplicas", 0)}
+        except Exception:
+            return {"desired": None, "ready": None}
+
+    def get_node_count():
+        try:
+            data = k8s_api_get("/api/v1/nodes")
+            items = data.get("items", [])
+            ready = sum(
+                1 for n in items
+                if any(c.get("type") == "Ready" and c.get("status") == "True" for c in n.get("status", {}).get("conditions", []))
+            )
+            return {"total": len(items), "ready": ready}
+        except Exception:
+            return {"total": None, "ready": None}
+
+    def engine_get(path, timeout=4):
+        with urllib.request.urlopen(f"{ENGINE}{path}", timeout=timeout) as resp:
+            return json.load(resp)
+
+    def engine_post(path, payload, timeout=4):
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            f"{ENGINE}{path}", data=data,
+            headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, json.load(resp)
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.load(e)
+            except Exception:
+                return e.code, {"error": "engine returned an unreadable error"}
+        except (urllib.error.URLError, socket.timeout, TimeoutError):
+            return 503, {"error": "trading-engine is busy, try again"}
+
+    PAGE = """<html>
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stock Trading Demo</title>
+    <style>
+      :root {
+        --bg: #0b0f14; --ink: #dce6f0; --ink-dim: #8fa0b3; --ink-faint: #5a6b7d;
+        --card: #141b22; --card-inset: #0f151b; --border: #2a3542; --border-dim: #232d38;
+        --accent: #7fd1ff; --good: #4caf50; --bad: #f44336; --live: #cfe066;
+      }
+      * { box-sizing: border-box; }
+      body { font-family: monospace; background:var(--bg); color:var(--ink); margin:0; padding: 0 3vw 4vh; }
+      h1 { margin:0; font-size:1.5em; }
+      .byline { margin: 0; font-size:0.85em; color:var(--ink-dim); }
+      .disclaimer { margin: 0.1em 0 0; font-size:0.8em; color:var(--ink-faint); font-style:italic; }
+      h2 { color:var(--accent); font-size:1.05em; margin:0 0 0.8em; }
+      table { border-collapse: collapse; width:100%; }
+      td, th { padding: 4px 8px; text-align: right; border-bottom:1px solid var(--border-dim); }
+      td:first-child, th:first-child { text-align:left; }
+      .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:1.2em; }
+      .topbar { position:sticky; top:0; z-index:10; background:rgba(11,15,20,0.92); backdrop-filter: blur(4px); padding: 2.5vh 0 1em; margin-bottom: 1.5em; border-bottom:1px solid var(--border); }
+      .topbar-row { display:flex; justify-content:space-between; align-items:flex-start; gap:1em; flex-wrap:wrap; }
+      .badge-group { display:flex; flex-direction:column; gap:0.4em; align-items:flex-end; }
+      .bot-badge { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 12px; font-size:0.9em; color:var(--ink-dim); white-space:nowrap; }
+      .bot-badge .n { color:var(--accent); font-weight:bold; }
+      .bot-badge.idle .n { color:var(--ink-faint); }
+      .bot-badge.busy .n { color:var(--live); }
+      .timeline-card { margin-top: 1em; }
+      .timeline-track { position:relative; display:flex; height: 26px; border-radius:6px; overflow:hidden; border:1px solid var(--border); }
+      .timeline-seg { flex:1; display:flex; align-items:center; justify-content:center; font-size:0.72em; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-faint); background:var(--card-inset); border-right:1px solid var(--border); transition: background 0.4s, color 0.4s; }
+      .timeline-seg:last-child { border-right:none; }
+      .timeline-seg.active { color:var(--bg); font-weight:bold; }
+      .timeline-seg[data-phase="open"].active { background: var(--good); }
+      .timeline-seg[data-phase="quiet"].active { background: var(--accent); }
+      .timeline-seg[data-phase="closed"].active { background: var(--bad); }
+      .timeline-marker { position:absolute; top:-2px; bottom:-2px; width:2px; background:#fff; box-shadow:0 0 5px #fff; transition: left 1s linear; }
+      .timeline-label { margin: 0.4em 0 0; font-size:0.85em; color:var(--ink-dim); }
+      #market-status.fresh { color: var(--live); font-weight: bold; }
+      #market-status.closed { color: var(--bad); }
+      .conn-badge { color:var(--bad); font-weight:bold; display:none; }
+      .status-row { display:flex; align-items:center; gap:0.5em; margin-top:0.4em; color:var(--ink-dim); flex-wrap:wrap; }
+      .live-dot { width:8px; height:8px; border-radius:50%; background:var(--live); box-shadow:0 0 6px var(--live); flex-shrink:0; animation: pulse 2s ease-in-out infinite; }
+      .live-dot.stale { background:var(--bad); box-shadow:0 0 6px var(--bad); animation:none; }
+      @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+      .msg { min-height: 1.2em; margin-top:0.4em; }
+      .msg.ok { color: #8f8; }
+      .msg.err { color: #f88; }
+      .layout { display:grid; grid-template-columns: 1fr 340px; gap: 1.5em; align-items:start; }
+      .main-col { display:flex; flex-direction:column; gap: 1.5em; min-width:0; }
+      .side-col { display:flex; flex-direction:column; gap: 1.5em; position:sticky; top: 110px; }
+      @media (max-width: 900px) {
+        .layout { grid-template-columns: 1fr; }
+        .side-col { position:static; }
+      }
+      .cash { color:#8f8; font-size:1.3em; margin: 0 0 0.2em; }
+      .pnl { font-size:1.05em; margin: 0 0 0.8em; }
+      .pnl.up { color: var(--good); }
+      .pnl.down { color: var(--bad); }
+      #pending-box { margin-top: 1em; padding-top: 0.8em; border-top:1px dashed var(--border); }
+      .pending-label { margin: 0 0 0.4em; font-size:0.85em; color:var(--accent); }
+      form { margin-top: 0.5em; display:flex; gap: 0.5em; flex-wrap: wrap; align-items:center; }
+      select, input, button { background:var(--bg); color:var(--ink); border:1px solid var(--border); padding: 7px 9px; border-radius:4px; font-family: monospace; font-size:0.95em; }
+      select, input { width:100%; }
+      button { cursor:pointer; width:100%; }
+      button.buy { border-color:var(--good); color:var(--good); }
+      button.sell { border-color:var(--bad); color:var(--bad); }
+      button.dump { border-color:var(--bad); background:#3a1414; color:#ff8a80; font-weight:bold; }
+      button.reset { border-color:var(--ink-faint); color:var(--ink-dim); }
+      .qty-presets { display:flex; gap:0.5em; width:100%; flex-wrap:wrap; }
+      .qty-preset { width:36px; height:36px; padding:0; border-radius:50%; flex:0 0 auto; font-size:0.85em; color:var(--ink-dim); }
+      .qty-preset:hover { border-color:var(--accent); color:var(--accent); }
+      .qty-preset.active { border-color:var(--accent); color:var(--accent); background:rgba(127,209,255,0.1); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      tr.mine { background: #2a3a1e; }
+      tr.mine td:first-child::before { content: "\\2605  "; color: var(--live); }
+      .legend { font-size: 0.85em; color: var(--ink-dim); margin-top: 0.6em; }
+      .legend .swatch { display:inline-block; width:10px; height:10px; background:#2a3a1e; border:1px solid var(--live); margin-right:4px; vertical-align:middle; }
+      .chart-wrap { position:relative; }
+      .chart-tooltip { position:absolute; background:var(--card-inset); border:1px solid var(--border); border-radius:4px; padding:6px 10px; font-size:0.85em; pointer-events:none; display:none; white-space:nowrap; }
+      .spark-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.7em; }
+      .spark-cell { background:var(--card-inset); border:1px solid var(--border-dim); border-radius:6px; padding: 0.5em 0.7em; }
+      .spark-cell .sym { color:var(--accent); font-size:0.8em; }
+      .spark-cell .price { font-size:1.05em; margin: 2px 0 4px; }
+      .section-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5em; margin-bottom:0.8em; }
+      .section-header h2 { margin:0; }
+      .filter-row { display:flex; gap:0.4em; }
+      .filter-btn { width:auto; padding:4px 10px; font-size:0.85em; border-radius:14px; color:var(--ink-dim); background:transparent; }
+      .filter-btn.active { color:var(--bg); background:var(--accent); border-color:var(--accent); }
+      .footer { position:fixed; right:1em; bottom:0.6em; text-align:right; z-index:5; pointer-events:none; }
+    </style>
+    </head>
+    <body>
+      <div class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-left">
+            <h1>Stock Trading Demo</h1>
+            <div class="status-row">
+              <span class="live-dot" id="live-dot"></span>
+              <span id="market-status">market status: loading...</span>
+              <span class="conn-badge" id="conn-badge">reconnecting…</span>
+            </div>
+            <p class="msg" id="msg"></p>
+          </div>
+          <div class="badge-group">
+            <div class="bot-badge" id="bot-badge">bots: …</div>
+            <div class="bot-badge" id="engine-badge">engines: …</div>
+            <div class="bot-badge" id="node-badge">nodes: …</div>
+            <div class="bot-badge" id="ops-badge">orders/sec: …</div>
+          </div>
+        </div>
+        <div class="timeline-card">
+          <div class="timeline-track">
+            <div class="timeline-seg" data-phase="open">open</div>
+            <div class="timeline-seg" data-phase="quiet">quiet</div>
+            <div class="timeline-seg" data-phase="closed">closed</div>
+            <div class="timeline-marker" id="timeline-marker"></div>
+          </div>
+          <p class="timeline-label" id="timeline-label">loading...</p>
+        </div>
+      </div>
+
+      <div class="layout">
+        <main class="main-col">
+          <div class="card">
+            <h2>portfolio value over time</h2>
+            <div class="chart-wrap">
+              <svg id="portfolio-chart" viewBox="0 0 640 110" style="width:100%; height:110px; display:block;"></svg>
+              <div class="chart-tooltip" id="portfolio-tooltip"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>tickers (26)</h2>
+            <div class="spark-grid" id="spark-grid"></div>
+          </div>
+
+          <div class="card">
+            <div class="section-header">
+              <h2>recent trades</h2>
+              <div class="filter-row">
+                <button class="filter-btn active" id="filter-all" type="button">all</button>
+                <button class="filter-btn" id="filter-mine" type="button">mine</button>
+              </div>
+            </div>
+            <table id="trades"><tr><th>time</th><th>side</th><th>symbol</th><th>qty</th><th>price</th></tr></table>
+            <p class="legend"><span class="swatch"></span>your orders</p>
+          </div>
+        </main>
+
+        <aside class="side-col">
+          <div class="card">
+            <h2>portfolio</h2>
+            <p class="cash" id="cash">loading...</p>
+            <p class="pnl" id="pnl"></p>
+            <table id="positions"><tr><th>symbol</th><th>qty</th><th>price</th><th>value</th></tr></table>
+            <div id="pending-box" style="display:none;">
+              <p class="pending-label">queued for next open:</p>
+              <table id="pending-orders"><tr><th>side</th><th>symbol</th><th>qty</th></tr></table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>place order</h2>
+            <form id="order-form">
+              <select name="symbol" id="symbol"></select>
+              <input name="qty" id="qty" type="number" step="0.01" min="0.01" value="1" required>
+              <div class="qty-presets">
+                <button class="qty-preset" type="button" data-qty="5">5</button>
+                <button class="qty-preset" type="button" data-qty="10">10</button>
+                <button class="qty-preset" type="button" data-qty="20">20</button>
+                <button class="qty-preset" type="button" data-qty="30">30</button>
+                <button class="qty-preset" type="button" data-qty="40">40</button>
+                <button class="qty-preset" type="button" data-qty="50">50</button>
+              </div>
+              <button class="buy" id="buy-btn" type="submit" name="side" value="buy">buy</button>
+              <button class="sell" id="sell-btn" type="submit" name="side" value="sell">sell</button>
+              <button class="sell" id="sell-all-btn" type="button">sell all</button>
+              <button class="dump" id="dump-btn" type="button">dump and run</button>
+              <button class="reset" id="reset-btn" type="button">reset my portfolio</button>
+            </form>
+          </div>
+        </aside>
+      </div>
+      <script>
+        let lastSymbols = null;
+        let lastTrades = [];
+        let lastUserTrades = [];
+        let tradeFilter = 'all';
+        let lastGoodRefresh = 0;
+        let lastEvents = [];
+        const STARTING_CASH = 100000;
+        let CYCLE_PHASES = [['open', 480], ['quiet', 180], ['closed', 180]]; // updated live from /api/config
+
+        async function refreshCycleConfig() {
+          try {
+            const resp = await fetch('/api/config', {cache: 'no-store'});
+            if (!resp.ok) return;
+            const cfg = await resp.json();
+            CYCLE_PHASES = [
+              ['open', cfg.open_minutes * 60],
+              ['quiet', cfg.quiet_minutes * 60],
+              ['closed', cfg.closed_minutes * 60],
+            ];
+          } catch (e) {
+            // keep the last known durations, next tick will retry
+          }
+        }
+
+        function fmt(n) { return Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+        function renderTrades() {
+          // "mine" reads from a dedicated, longer-retained per-user history so your
+          // own trades don't get crowded out of view by the bot swarm's volume.
+          const rows = tradeFilter === 'mine' ? lastUserTrades : lastTrades;
+          document.getElementById('trades').innerHTML = '<tr><th>time</th><th>side</th><th>symbol</th><th>qty</th><th>price</th></tr>' +
+            (rows.length
+              ? rows.map(t => `<tr class="${t.source === 'user' ? 'mine' : ''}"><td>${t.time}</td><td>${t.side.toUpperCase()}</td><td>${t.symbol}</td><td>${fmt(t.qty)}</td><td>§${fmt(t.price)}</td></tr>`).join('')
+              : `<tr><td colspan="5">${tradeFilter === 'mine' ? 'no orders placed yet' : 'no trades yet'}</td></tr>`);
+        }
+
+        function setFilter(f) {
+          tradeFilter = f;
+          document.getElementById('filter-all').classList.toggle('active', f === 'all');
+          document.getElementById('filter-mine').classList.toggle('active', f === 'mine');
+          renderTrades();
+        }
+
+        function updateConnStatus(ok) {
+          const dot = document.getElementById('live-dot');
+          const badge = document.getElementById('conn-badge');
+          if (ok) lastGoodRefresh = Date.now();
+          const stale = Date.now() - lastGoodRefresh > 6000;
+          dot.classList.toggle('stale', stale);
+          badge.style.display = stale ? 'inline' : 'none';
+        }
+
+        function buildPath(points, w, h, padding) {
+          const xs = points.map(p => p[0]);
+          const ys = points.map(p => p[1]);
+          const minX = Math.min(...xs), maxX = Math.max(...xs);
+          const minY = Math.min(...ys), maxY = Math.max(...ys);
+          const spanX = (maxX - minX) || 1;
+          const spanY = (maxY - minY) || 1;
+          const scaleX = x => padding + (x - minX) / spanX * (w - padding * 2);
+          const scaleY = y => h - padding - (y - minY) / spanY * (h - padding * 2);
+          const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${scaleX(p[0]).toFixed(1)},${scaleY(p[1]).toFixed(1)}`).join(' ');
+          const area = `${path} L${scaleX(maxX).toFixed(1)},${(h - padding).toFixed(1)} L${scaleX(minX).toFixed(1)},${(h - padding).toFixed(1)} Z`;
+          return {path, area, scaleX, scaleY, minY, maxY};
+        }
+
+        let portfolioHistory = [];
+        let priceHistory = {};
+
+        function renderPortfolioChart() {
+          const svg = document.getElementById('portfolio-chart');
+          const w = 640, h = 110, padding = 22;
+          if (portfolioHistory.length < 2) {
+            svg.innerHTML = `<text x="20" y="55" fill="#5a6b7d" font-size="13">collecting history...</text>`;
+            return;
+          }
+          const {path, area, scaleX, scaleY, minY, maxY} = buildPath(portfolioHistory, w, h, padding);
+          const last = portfolioHistory[portfolioHistory.length - 1];
+          svg.innerHTML = `
+            <line x1="${padding}" y1="${h - padding}" x2="${w - padding}" y2="${h - padding}" stroke="#2a3542" stroke-width="1"/>
+            <path d="${area}" fill="#7fd1ff" fill-opacity="0.1" stroke="none"/>
+            <path d="${path}" fill="none" stroke="#7fd1ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            <circle cx="${scaleX(last[0]).toFixed(1)}" cy="${scaleY(last[1]).toFixed(1)}" r="4" fill="#cfe066" stroke="#141b22" stroke-width="2"/>
+            <text x="${padding}" y="14" fill="#5a6b7d" font-size="11">§${maxY.toLocaleString(undefined,{maximumFractionDigits:0})}</text>
+            <text x="${padding}" y="${h - padding + 14}" fill="#5a6b7d" font-size="11">§${minY.toLocaleString(undefined,{maximumFractionDigits:0})}</text>
+            <line id="crosshair" x1="0" y1="${padding}" x2="0" y2="${h - padding}" stroke="#5a6b7d" stroke-width="1" style="display:none;"/>
+            <rect id="hover-rect" x="0" y="0" width="${w}" height="${h}" fill="transparent"/>
+          `;
+          const hoverRect = svg.querySelector('#hover-rect');
+          const crosshair = svg.querySelector('#crosshair');
+          const tooltip = document.getElementById('portfolio-tooltip');
+          hoverRect.addEventListener('mousemove', (e) => {
+            const rect = svg.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (w / rect.width);
+            let nearest = portfolioHistory[0], nearestDist = Infinity, nearestX = scaleX(portfolioHistory[0][0]);
+            for (const p of portfolioHistory) {
+              const px = scaleX(p[0]);
+              const d = Math.abs(px - mx);
+              if (d < nearestDist) { nearestDist = d; nearest = p; nearestX = px; }
+            }
+            crosshair.style.display = 'block';
+            crosshair.setAttribute('x1', nearestX.toFixed(1));
+            crosshair.setAttribute('x2', nearestX.toFixed(1));
+            tooltip.style.display = 'block';
+            tooltip.style.left = Math.min(e.clientX - rect.left + 12, rect.width - 130) + 'px';
+            tooltip.style.top = (e.clientY - rect.top - 34) + 'px';
+            const t = new Date(nearest[0] * 1000);
+            tooltip.innerHTML = `<strong>§${fmt(nearest[1])}</strong><br><span style="color:#8fa0b3">${t.toLocaleTimeString()}</span>`;
+          });
+          hoverRect.addEventListener('mouseleave', () => {
+            crosshair.style.display = 'none';
+            tooltip.style.display = 'none';
+          });
+        }
+
+        function renderSparklines() {
+          const grid = document.getElementById('spark-grid');
+          const symbols = Object.keys(priceHistory).sort();
+          grid.innerHTML = symbols.map(sym => {
+            const points = priceHistory[sym];
+            const w = 120, h = 30, padding = 3;
+            let svgInner = '';
+            if (points && points.length >= 2) {
+              const {path, scaleX, scaleY} = buildPath(points, w, h, padding);
+              const last = points[points.length - 1];
+              svgInner = `<path d="${path}" fill="none" stroke="#7fd1ff" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>` +
+                `<circle cx="${scaleX(last[0]).toFixed(1)}" cy="${scaleY(last[1]).toFixed(1)}" r="2.5" fill="#cfe066"/>`;
+            }
+            const cur = window.__lastPrices && window.__lastPrices[sym];
+            const curText = cur !== undefined ? fmt(cur) : '...';
+            return `<div class="spark-cell">
+              <div class="sym">${sym}</div>
+              <div class="price">§${curText}</div>
+              <svg viewBox="0 0 ${w} ${h}" style="width:100%; height:30px; display:block;"><title>${sym}: §${curText}</title>${svgInner}</svg>
+            </div>`;
+          }).join('');
+        }
+
+        async function refreshHistory() {
+          try {
+            const resp = await fetch('/api/history', {cache: 'no-store'});
+            if (!resp.ok) return;
+            const data = await resp.json();
+            portfolioHistory = data.portfolio || [];
+            priceHistory = data.prices || {};
+            renderPortfolioChart();
+            renderSparklines();
+          } catch (e) {
+            // transient poll failure, next tick will retry
+          }
+        }
+
+        function renderTimeline() {
+          const opens = lastEvents.filter(e => e.type === 'market_open');
+          const label = document.getElementById('timeline-label');
+          const marker = document.getElementById('timeline-marker');
+          const segs = document.querySelectorAll('.timeline-seg');
+          if (!opens.length) {
+            label.textContent = 'no session recorded yet — first cycle starts on the next 14-min tick';
+            marker.style.left = '0%';
+            segs.forEach(s => s.classList.remove('active'));
+            return;
+          }
+          const cycleLen = CYCLE_PHASES.reduce((sum, [, len]) => sum + len, 0);
+          const elapsed = Math.max(0, Date.now() / 1000 - opens[0].epoch);
+          const pos = Math.min(elapsed, cycleLen);
+          marker.style.left = ((pos / cycleLen) * 100).toFixed(1) + '%';
+
+          // Segment widths track actual phase duration (not equal thirds), so the
+          // marker's position always lines up with the bar underneath it.
+          segs.forEach(s => {
+            const durationEntry = CYCLE_PHASES.find(([name]) => name === s.dataset.phase);
+            if (durationEntry) s.style.flex = `${durationEntry[1]} 0 0`;
+          });
+
+          let acc = 0, phase = 'closed', remaining = 0;
+          for (const [name, len] of CYCLE_PHASES) {
+            if (elapsed < acc + len) { phase = name; remaining = acc + len - elapsed; break; }
+            acc += len;
+          }
+          if (elapsed >= cycleLen) { phase = 'pending'; remaining = 0; }
+
+          segs.forEach(s => s.classList.toggle('active', s.dataset.phase === phase));
+          const mm = Math.floor(remaining / 60), ss = Math.floor(remaining % 60);
+          label.textContent = phase === 'pending'
+            ? 'cycle complete — waiting for the next scheduled open'
+            : `${phase} — ${mm}m ${String(ss).padStart(2, '0')}s remaining`;
+        }
+
+        async function refresh() {
+          try {
+            const resp = await fetch('/api/state', {cache: 'no-store'});
+            if (!resp.ok) { updateConnStatus(false); return; }
+            const data = await resp.json();
+            updateConnStatus(true);
+
+            const badge = document.getElementById('bot-badge');
+            const bots = data.bots || {};
+            if (bots.ready === null || bots.ready === undefined) {
+              badge.textContent = 'bots: unknown';
+              badge.className = 'bot-badge';
+            } else {
+              badge.innerHTML = `bots: <span class="n">${bots.ready}</span>/${bots.desired}`;
+              badge.className = 'bot-badge ' + (bots.desired === 0 ? 'idle' : bots.desired > 2 ? 'busy' : '');
+            }
+
+            const engineBadge = document.getElementById('engine-badge');
+            const engines = data.engines || {};
+            if (engines.ready === null || engines.ready === undefined) {
+              engineBadge.textContent = 'engines: unknown';
+              engineBadge.className = 'bot-badge';
+            } else {
+              engineBadge.innerHTML = `engines: <span class="n">${engines.ready}</span>/${engines.desired}`;
+              engineBadge.className = 'bot-badge ' + (engines.ready < engines.desired ? 'idle' : '');
+            }
+
+            const nodeBadge = document.getElementById('node-badge');
+            const nodes = data.nodes || {};
+            if (nodes.total === null || nodes.total === undefined) {
+              nodeBadge.textContent = 'nodes: unknown';
+              nodeBadge.className = 'bot-badge';
+            } else {
+              nodeBadge.innerHTML = `nodes: <span class="n">${nodes.ready}</span>/${nodes.total}`;
+              nodeBadge.className = 'bot-badge ' + (nodes.ready < nodes.total ? 'idle' : '');
+            }
+
+            const opsBadge = document.getElementById('ops-badge');
+            if (data.orders_per_sec === null || data.orders_per_sec === undefined) {
+              opsBadge.textContent = 'orders/sec: …';
+              opsBadge.className = 'bot-badge';
+            } else {
+              opsBadge.innerHTML = `orders/sec: <span class="n">${data.orders_per_sec.toFixed(1)}</span>`;
+              opsBadge.className = 'bot-badge ' + (data.orders_per_sec > 5 ? 'busy' : data.orders_per_sec === 0 ? 'idle' : '');
+            }
+
+            const symbols = Object.keys(data.prices).sort();
+            if (JSON.stringify(symbols) !== JSON.stringify(lastSymbols)) {
+              const sel = document.getElementById('symbol');
+              sel.innerHTML = symbols.map(s => `<option value="${s}">${s}</option>`).join('');
+              lastSymbols = symbols;
+            }
+
+            window.__lastPrices = data.prices;
+            window.__lastPortfolio = data.portfolio;
+
+            document.getElementById('cash').innerHTML =
+              `cash: §${fmt(data.portfolio.cash)}<br>total value: §${fmt(data.portfolio.total_value)}`;
+
+            const pnl = data.portfolio.total_value - STARTING_CASH;
+            const pnlPct = (pnl / STARTING_CASH) * 100;
+            const pnlEl = document.getElementById('pnl');
+            pnlEl.className = 'pnl ' + (pnl >= 0 ? 'up' : 'down');
+            pnlEl.textContent = `${pnl >= 0 ? '+' : ''}§${fmt(pnl)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%) vs start`;
+
+            const posEntries = Object.entries(data.portfolio.positions || {}).filter(([,d]) => d.qty > 0);
+            document.getElementById('positions').innerHTML = '<tr><th>symbol</th><th>qty</th><th>price</th><th>value</th></tr>' +
+              (posEntries.length
+                ? posEntries.map(([s,d]) => `<tr><td>${s}</td><td>${fmt(d.qty)}</td><td>§${fmt(d.price)}</td><td>§${fmt(d.market_value)}</td></tr>`).join('')
+                : '<tr><td colspan="4">no positions</td></tr>');
+
+            const pending = data.pending || [];
+            const pendingBox = document.getElementById('pending-box');
+            if (pending.length) {
+              pendingBox.style.display = 'block';
+              document.getElementById('pending-orders').innerHTML = '<tr><th>side</th><th>symbol</th><th>qty</th></tr>' +
+                pending.map(o => `<tr><td>${o.side.toUpperCase()}</td><td>${o.symbol}</td><td>${fmt(o.qty)}</td></tr>`).join('');
+            } else {
+              pendingBox.style.display = 'none';
+            }
+
+            lastTrades = data.trades || [];
+            lastUserTrades = data.user_trades || [];
+            renderTrades();
+
+            const status = document.getElementById('market-status');
+            const transitions = (data.events || []).filter(e => e.type === 'market_open' || e.type === 'market_close');
+            if (transitions.length) {
+              const last = transitions[0];
+              const ageSec = Date.now() / 1000 - last.epoch;
+              if (last.type === 'market_close') {
+                status.textContent = ageSec < 20
+                  ? `market just closed at ${last.time} — reopens on the next 14-min cycle`
+                  : `market closed at ${last.time}`;
+                status.className = 'closed';
+              } else {
+                status.textContent = ageSec < 20
+                  ? `market just opened at ${last.time} — opening bell volatility applied`
+                  : `market open since ${last.time}`;
+                status.className = ageSec < 20 ? 'fresh' : '';
+              }
+            } else {
+              status.textContent = 'market status: no session recorded yet (cycles every 14 min)';
+            }
+
+            lastEvents = data.events || [];
+            renderTimeline();
+          } catch (e) {
+            updateConnStatus(false);
+          }
+        }
+
+        async function postOrder(symbol, side, qty) {
+          try {
+            const resp = await fetch('/order', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({symbol, side, qty}),
+            });
+            const result = await resp.json();
+            return {ok: resp.ok, result};
+          } catch (err) {
+            return {ok: false, result: {error: 'could not reach server'}};
+          }
+        }
+
+        async function submitOrder(symbol, side, qty) {
+          const msg = document.getElementById('msg');
+          const buttons = document.querySelectorAll('#order-form button');
+          buttons.forEach(b => b.disabled = true);
+          msg.className = 'msg';
+          msg.textContent = 'submitting...';
+          const {ok, result} = await postOrder(symbol, side, qty);
+          if (ok) {
+            msg.className = 'msg ok';
+            msg.textContent = result.queued
+              ? `market is closed — ${side} ${qty} ${symbol} queued for next open`
+              : `executed ${side} ${qty} ${symbol}`;
+          } else {
+            msg.className = 'msg err';
+            msg.textContent = `order failed: ${result.error || 'unknown error'}`;
+          }
+          buttons.forEach(b => b.disabled = false);
+          refresh();
+        }
+
+        async function dumpAndRun() {
+          const msg = document.getElementById('msg');
+          const buttons = document.querySelectorAll('#order-form button');
+          const positions = (window.__lastPortfolio && window.__lastPortfolio.positions) || {};
+          const toSell = Object.entries(positions).filter(([, d]) => d.qty > 0);
+          if (!toSell.length) {
+            msg.className = 'msg err';
+            msg.textContent = 'no positions to dump';
+            return;
+          }
+          buttons.forEach(b => b.disabled = true);
+          let succeeded = 0, queued = 0, failed = 0;
+          for (const [symbol, d] of toSell) {
+            msg.className = 'msg';
+            msg.textContent = `dumping... ${succeeded + queued + failed + 1}/${toSell.length} (${symbol})`;
+            const {ok, result} = await postOrder(symbol, 'sell', d.qty);
+            if (ok && result.queued) queued++;
+            else if (ok) succeeded++;
+            else failed++;
+          }
+          msg.className = failed ? 'msg err' : 'msg ok';
+          msg.textContent = `dump and run: sold ${succeeded}` +
+            (queued ? `, queued ${queued} for next open` : '') +
+            (failed ? `, ${failed} failed` : '');
+          buttons.forEach(b => b.disabled = false);
+          refresh();
+        }
+
+        document.getElementById('order-form').addEventListener('submit', (e) => {
+          e.preventDefault();
+          const side = e.submitter ? e.submitter.value : 'buy';
+          const symbol = document.getElementById('symbol').value;
+          const qty = document.getElementById('qty').value;
+          submitOrder(symbol, side, qty);
+        });
+
+        document.getElementById('sell-all-btn').addEventListener('click', () => {
+          const symbol = document.getElementById('symbol').value;
+          const msg = document.getElementById('msg');
+          const held = window.__lastPortfolio &&
+            window.__lastPortfolio.positions &&
+            window.__lastPortfolio.positions[symbol] &&
+            window.__lastPortfolio.positions[symbol].qty;
+          if (!held || held <= 0) {
+            msg.className = 'msg err';
+            msg.textContent = `no ${symbol} position to sell`;
+            return;
+          }
+          submitOrder(symbol, 'sell', held);
+        });
+
+        document.getElementById('dump-btn').addEventListener('click', () => {
+          dumpAndRun();
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', async () => {
+          if (!confirm('Reset your portfolio back to §100,000 and clear your trade history? This only affects your account, not the bot swarm.')) return;
+          const msg = document.getElementById('msg');
+          const buttons = document.querySelectorAll('#order-form button');
+          buttons.forEach(b => b.disabled = true);
+          msg.className = 'msg';
+          msg.textContent = 'resetting...';
+          try {
+            const resp = await fetch('/reset', {method: 'POST'});
+            const result = await resp.json();
+            msg.className = resp.ok ? 'msg ok' : 'msg err';
+            msg.textContent = resp.ok ? 'portfolio reset to §100,000' : `reset failed: ${result.error || 'unknown error'}`;
+          } catch (err) {
+            msg.className = 'msg err';
+            msg.textContent = 'reset failed: could not reach server';
+          }
+          buttons.forEach(b => b.disabled = false);
+          refresh();
+        });
+
+        document.getElementById('filter-all').addEventListener('click', () => setFilter('all'));
+        document.getElementById('filter-mine').addEventListener('click', () => setFilter('mine'));
+
+        document.querySelectorAll('.qty-preset').forEach(btn => {
+          btn.addEventListener('click', () => {
+            document.getElementById('qty').value = btn.dataset.qty;
+            document.querySelectorAll('.qty-preset').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+          });
+        });
+        document.getElementById('qty').addEventListener('input', () => {
+          document.querySelectorAll('.qty-preset').forEach(b => b.classList.remove('active'));
+        });
+
+        refresh();
+        setInterval(refresh, 2000);
+        setInterval(renderTimeline, 1000);
+
+        refreshHistory();
+        setInterval(refreshHistory, 2500);
+
+        refreshCycleConfig();
+        setInterval(refreshCycleConfig, 10000);
+      </script>
+      <div class="footer">
+        <p class="byline">by Steve McBride &middot; built by AI</p>
+        <p class="disclaimer">This isn't real and only intended to load test a cluster.</p>
+      </div>
+    </body>
+    </html>"""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, content_type, body_bytes):
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body_bytes)))
+            self.end_headers()
+            self.wfile.write(body_bytes)
+
+        def _json(self, code, obj):
+            self._send(code, "application/json; charset=utf-8", json.dumps(obj).encode("utf-8"))
+
+        def do_GET(self):
+            if self.path == "/api/state":
+                try:
+                    prices = r.hgetall("prices")
+                except Exception:
+                    prices = {}
+                try:
+                    portfolio = engine_get("/portfolio?source=user", timeout=2)
+                except Exception:
+                    portfolio = {"cash": 0, "positions": {}, "total_value": 0}
+                try:
+                    trades = engine_get("/trades", timeout=2)
+                except Exception:
+                    trades = []
+                try:
+                    user_trades = engine_get("/trades?source=user&limit=49", timeout=2)
+                except Exception:
+                    user_trades = []
+                try:
+                    events = engine_get("/events", timeout=2)
+                except Exception:
+                    events = []
+                try:
+                    pending = engine_get("/pending?source=user", timeout=2)
+                except Exception:
+                    pending = []
+                bots = get_bot_count()
+                engines = get_engine_count()
+                nodes = get_node_count()
+                orders_per_sec = get_orders_per_sec()
+                self._json(200, {
+                    "prices": prices, "portfolio": portfolio, "trades": trades,
+                    "user_trades": user_trades, "events": events, "bots": bots, "engines": engines,
+                    "nodes": nodes, "orders_per_sec": orders_per_sec, "pending": pending,
+                })
+                return
+            if self.path == "/api/history":
+                try:
+                    portfolio_hist = [json.loads(x) for x in r.lrange("history:portfolio", -150, -1)]
+                except Exception:
+                    portfolio_hist = []
+                price_hist = {}
+                try:
+                    symbols = r.hkeys("prices")
+                    pipe = r.pipeline()
+                    for sym in symbols:
+                        pipe.lrange(f"history:{sym}", -60, -1)
+                    results = pipe.execute()
+                    for sym, raw in zip(symbols, results):
+                        price_hist[sym] = [json.loads(x) for x in raw]
+                except Exception:
+                    price_hist = {}
+                self._json(200, {"portfolio": portfolio_hist, "prices": price_hist})
+                return
+            if self.path == "/api/config":
+                try:
+                    self._json(200, engine_get("/config", timeout=2))
+                except Exception:
+                    self._json(503, {"error": "trading-engine unreachable"})
+                return
+            self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
+
+        def do_POST(self):
+            if self.path == "/reset":
+                status, resp = engine_post("/reset", {"source": "user"})
+                self._json(status, resp)
+                return
+            if self.path == "/api/config":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    data = json.loads(self.rfile.read(length))
+                except Exception:
+                    self._json(400, {"error": "invalid request body"})
+                    return
+                status, resp = engine_post("/config", data)
+                self._json(status, resp)
+                return
+            if self.path != "/order":
+                self._json(404, {"error": "not found"})
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                data = json.loads(self.rfile.read(length))
+            except Exception:
+                self._json(400, {"error": "invalid request body"})
+                return
+            status, resp = engine_post("/order", {
+                "symbol": data.get("symbol"), "side": data.get("side"), "qty": data.get("qty"),
+                "source": "user",
+            })
+            self._json(status, resp)
+
+        def log_message(self, fmt, *args):
+            pass
+
+    ThreadingHTTPServer(("0.0.0.0", 80), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-dashboard
+  namespace: apps
+  labels:
+    app: trading-dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trading-dashboard
+  template:
+    metadata:
+      labels:
+        app: trading-dashboard
+    spec:
+      serviceAccountName: trading-dashboard
+      containers:
+        - name: dashboard
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/dashboard.py"]
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: trading-dashboard-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trading-dashboard-lb
+  namespace: apps
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 172.16.100.16
+spec:
+  type: LoadBalancer
+  selector:
+    app: trading-dashboard
+  ports:
+    - port: 80
+      targetPort: 80

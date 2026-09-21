@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hft-bot-script
+  namespace: apps
+data:
+  bot.py: |
+    import http.client
+    import json
+    import os
+    import random
+    import string
+    import time
+
+    ENGINE_HOST = "trading-engine.apps.svc.cluster.local"
+    ENGINE_PORT = 80
+    SYMBOLS = [f"{c}{c}{c}" for c in string.ascii_uppercase]
+    BOT_ID = os.environ.get("HOSTNAME", "bot")
+
+    # A fresh urllib.request.urlopen() call opens a brand-new TCP connection
+    # every time, which dominates per-request latency under a tight polling
+    # loop and burns CPU server-side spawning a thread per connection. Reusing
+    # HTTP/1.1 keep-alive connections avoids both -- but a *single* persistent
+    # connection only ever lands on one trading-engine replica for its whole
+    # lifetime (kube-proxy picks a backend per new TCP connection, not per
+    # request), which concentrates all of a bot's load onto one pod. A small
+    # pool, round-robined, keeps the low-overhead benefit while still spreading
+    # each bot's own traffic across multiple replicas.
+    POOL_SIZE = 4
+    _conns = [None] * POOL_SIZE
+    _next_conn = 0
+
+    def place_order(symbol, side, qty):
+        global _next_conn
+        data = json.dumps({"symbol": symbol, "side": side, "qty": qty, "source": "bot"}).encode()
+        headers = {"Content-Type": "application/json"}
+        i = _next_conn
+        _next_conn = (_next_conn + 1) % POOL_SIZE
+        for attempt in range(2):
+            try:
+                if _conns[i] is None:
+                    _conns[i] = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=2)
+                _conns[i].request("POST", "/order", body=data, headers=headers)
+                resp = _conns[i].getresponse()
+                resp.read()  # drain the body so the connection is reusable
+                # http.client (unlike urllib.request) does not raise on 4xx/5xx --
+                # status must be checked explicitly for the rejected-order count to mean anything.
+                return resp.status == 200
+            except Exception:
+                try:
+                    _conns[i].close()
+                except Exception:
+                    pass
+                _conns[i] = None
+        return False
+
+    DEFAULT_RATE = 50  # orders/sec, per bot -- used until the first successful config fetch
+    TARGET_INTERVAL = 1.0 / DEFAULT_RATE
+    CONFIG_POLL_INTERVAL = 10  # seconds
+
+    def fetch_target_rate():
+        # A one-off connection is fine here -- this runs only once every
+        # CONFIG_POLL_INTERVAL seconds, unlike the order-placing hot path.
+        try:
+            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=2)
+            conn.request("GET", "/config")
+            resp = conn.getresponse()
+            body = resp.read()
+            conn.close()
+            if resp.status == 200:
+                rate = json.loads(body).get("bot_rate")
+                if rate and rate > 0:
+                    return rate
+        except Exception:
+            pass
+        return None
+
+    sent = 0
+    rejected = 0
+    last_report = time.time()
+    last_config_poll = 0
+    print(f"{BOT_ID}: starting, target {1.0 / TARGET_INTERVAL:.0f}/sec", flush=True)
+    while True:
+        cycle_start = time.time()
+
+        if cycle_start - last_config_poll > CONFIG_POLL_INTERVAL:
+            rate = fetch_target_rate()
+            if rate:
+                TARGET_INTERVAL = 1.0 / rate
+            last_config_poll = cycle_start
+
+        symbol = random.choice(SYMBOLS)
+        side = random.choice(["buy", "sell"])
+        qty = round(random.uniform(1, 5), 2)
+        ok = place_order(symbol, side, qty)
+        sent += 1
+        if not ok:
+            rejected += 1
+        if time.time() - last_report > 10:
+            print(f"{BOT_ID}: {sent} orders sent, {rejected} rejected, target {1.0 / TARGET_INTERVAL:.0f}/sec", flush=True)
+            last_report = time.time()
+        # Sleep only the remainder of the target interval, so request latency
+        # eats into the pacing budget instead of stacking on top of a flat sleep.
+        elapsed = time.time() - cycle_start
+        time.sleep(max(0.0, TARGET_INTERVAL - elapsed))
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hft-bot
+  namespace: apps
+  labels:
+    app: hft-bot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hft-bot
+  template:
+    metadata:
+      labels:
+        app: hft-bot
+    spec:
+      containers:
+        - name: bot
+          image: python:3.12-alpine
+          command: ["python3", "/app/bot.py"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: hft-bot-script
