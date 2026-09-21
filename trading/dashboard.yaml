@@ -877,7 +877,8 @@ metadata:
   name: trading-dashboard-lb
   namespace: apps
   annotations:
-    metallb.universe.tf/loadBalancerIPs: 172.16.100.16
+    # Replace with a free IP from your cluster's MetalLB pool.
+    metallb.universe.tf/loadBalancerIPs: <metallb-ip>
 spec:
   type: LoadBalancer
   selector:
