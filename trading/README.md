@@ -2,8 +2,8 @@
 
 Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
-Dashboard exposed at **http://\<metallb-ip>/** via MetalLB, running in the `apps` namespace.
-Also reachable at **https://trading.\<metallb-ip>.sslip.io/** via the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
+Dashboard exposed at **`http://<metallb-ip>/`** via MetalLB, running in the `apps` namespace.
+Also reachable at **`https://trading.<metallb-ip>.sslip.io/`** via the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
 Switched to `traefik` instead, which works correctly.
 
