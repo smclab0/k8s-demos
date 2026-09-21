@@ -876,9 +876,9 @@ kind: Service
 metadata:
   name: trading-dashboard-lb
   namespace: apps
-  annotations:
-    # Replace with a free IP from your cluster's MetalLB pool.
-    metallb.universe.tf/loadBalancerIPs: <metallb-ip>
+  # No metallb.universe.tf/loadBalancerIPs annotation here -- MetalLB
+  # auto-assigns from its pool. Pin a specific IP via a local overlay
+  # (see overlays/local/, not checked into git) if you want one.
 spec:
   type: LoadBalancer
   selector:

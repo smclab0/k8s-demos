@@ -11,9 +11,10 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    # Replace <traefik-ip> with your traefik ingress controller's
-    # external IP -- sslip.io resolves <name>.<ip>.sslip.io to <ip>.
-    - host: trading.<traefik-ip>.sslip.io
+    # trading.example.com is a placeholder -- override via a local overlay
+    # (see overlays/local/, not checked into git) with your own
+    # hostname, e.g. trading.<traefik's external IP>.sslip.io.
+    - host: trading.example.com
       http:
         paths:
           - path: /
@@ -25,5 +26,5 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - trading.<traefik-ip>.sslip.io
+        - trading.example.com
       secretName: trading-dashboard-tls

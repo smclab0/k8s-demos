@@ -2,8 +2,8 @@
 
 Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
-Dashboard exposed at **`http://<metallb-ip>/`** via MetalLB, running in the `apps` namespace.
-Also reachable at **`https://trading.<traefik-ip>.sslip.io/`** via the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
+The checked-in configs (`trading/`) use generic placeholders for this cluster's real IP/hostname (`dashboard.yaml`'s MetalLB IP, `ingress.yaml`'s host) — the real values live in a local, gitignored overlay (`overlays/local/`, see Deploying below) so they never hit git.
+On this cluster the dashboard is exposed via MetalLB and also reachable through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
 Switched to `traefik` instead, which works correctly.
 
@@ -12,7 +12,14 @@ Switched to `traefik` instead, which works correctly.
 Everything here is one Kustomize app — deploy or update all 21 resources (ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob) with:
 
 ```
-kubectl apply -k deploymenrs/trading/
+kubectl apply -k trading/
+```
+
+That deploys with the generic placeholder IP/hostname baked into `trading/` (MetalLB auto-assigns an IP, and the ingress host is `trading.example.com`, which won't resolve anywhere real).
+To deploy with this cluster's actual IP/hostname, use the local overlay instead — it's gitignored (`overlays/local/`) since it holds real values, so create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with patches for the `trading-dashboard-lb` Service's `metallb.universe.tf/loadBalancerIPs` annotation and the Ingress's `host`/`tls.hosts`):
+
+```
+kubectl apply -k overlays/local/
 ```
 
 It's safe to re-run any time — `kubectl apply` is idempotent, and none of the Deployments' pod templates or selectors are touched by re-applying, so a re-apply after only editing one file (e.g. `dashboard.yaml`) won't restart unrelated components.
