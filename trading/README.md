@@ -2,25 +2,34 @@
 
 Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
-The checked-in configs (`trading/`) use a generic placeholder for this cluster's real hostname (`ingress.yaml`'s host) — the real value lives in a local, gitignored overlay (`overlays/local/`, see Deploying below) so it never hits git.
+The checked-in configs (`trading/`) use a generic placeholder for this cluster's real hostname (`ingress.yaml`'s host) — `trading/deploy-local.sh` resolves the real, live one dynamically at apply time (or pin a fixed one via a local, gitignored overlay, `overlays/local/`) — see Deploying below.
 The dashboard is a `ClusterIP` Service, reachable only through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
 Switched to `traefik` instead, which works correctly.
 
 ## Deploying
 
-Everything here is one Kustomize app — deploy or update all 21 resources (ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob) with:
+Everything here is one Kustomize app — deploy or update all 23 resources (the `apps` Namespace, ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob) with:
 
 ```
 kubectl apply -k trading/
 ```
 
 That deploys with the generic placeholder hostname baked into `trading/` (the ingress host is `trading.example.com`, which won't resolve anywhere real).
-To deploy with this cluster's actual hostname, use the local overlay instead — it's gitignored (`overlays/local/`) since it holds a real value, so create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`):
 
-```
-kubectl apply -k overlays/local/
-```
+To deploy with a real, working hostname, use one of:
+
+- **Dynamic (recommended)** — `trading/deploy-local.sh` reads traefik's *current* LoadBalancer IP (`kubectl get svc rke2-traefik -n kube-system`) at apply time and sets the Ingress host to `trading.<that-ip>.sslip.io`, so it never goes stale if the IP changes:
+
+  ```
+  trading/deploy-local.sh
+  ```
+
+- **Static** — pin a fixed hostname via the local, gitignored overlay instead (`overlays/local/`), useful if you want a hostname that doesn't move even if traefik's IP does; create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`):
+
+  ```
+  kubectl apply -k overlays/local/
+  ```
 
 It's safe to re-run any time — `kubectl apply` is idempotent, and none of the Deployments' pod templates or selectors are touched by re-applying, so a re-apply after only editing one file (e.g. `dashboard.yaml`) won't restart unrelated components.
 Note: editing a ConfigMap's content and re-applying does **not** by itself restart the pod that mounts it (Kubernetes doesn't hot-reload mounted ConfigMaps into a running process here) — follow up with `kubectl rollout restart deployment/<name> -n apps` for whichever component's script changed.
