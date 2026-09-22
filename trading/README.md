@@ -2,8 +2,8 @@
 
 Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
-The checked-in configs (`trading/`) use generic placeholders for this cluster's real IP/hostname (`dashboard.yaml`'s MetalLB IP, `ingress.yaml`'s host) — the real values live in a local, gitignored overlay (`overlays/local/`, see Deploying below) so they never hit git.
-On this cluster the dashboard is exposed via MetalLB and also reachable through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
+The checked-in configs (`trading/`) use a generic placeholder for this cluster's real hostname (`ingress.yaml`'s host) — the real value lives in a local, gitignored overlay (`overlays/local/`, see Deploying below) so it never hits git.
+The dashboard is a `ClusterIP` Service, reachable only through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
 Switched to `traefik` instead, which works correctly.
 
@@ -15,8 +15,8 @@ Everything here is one Kustomize app — deploy or update all 21 resources (Serv
 kubectl apply -k trading/
 ```
 
-That deploys with the generic placeholder IP/hostname baked into `trading/` (MetalLB auto-assigns an IP, and the ingress host is `trading.example.com`, which won't resolve anywhere real).
-To deploy with this cluster's actual IP/hostname, use the local overlay instead — it's gitignored (`overlays/local/`) since it holds real values, so create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with patches for the `trading-dashboard-lb` Service's `metallb.universe.tf/loadBalancerIPs` annotation and the Ingress's `host`/`tls.hosts`):
+That deploys with the generic placeholder hostname baked into `trading/` (the ingress host is `trading.example.com`, which won't resolve anywhere real).
+To deploy with this cluster's actual hostname, use the local overlay instead — it's gitignored (`overlays/local/`) since it holds a real value, so create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`):
 
 ```
 kubectl apply -k overlays/local/
@@ -155,7 +155,7 @@ kubectl scale deployment/hft-bot -n apps --replicas=2
 kubectl create job market-open-manual --from=cronjob/market-open -n apps
 
 # reset just your own portfolio (cash/positions/trade history) -- same as the dashboard button
-curl -sS -X POST http://<metallb-ip>/reset
+curl -sS -X POST https://trading.<ingress-ip>.sslip.io/reset
 
 # wipe ALL trading state for everyone (prices, both portfolios, trades, events, history)
 kubectl exec -n apps deploy/redis -- redis-cli FLUSHALL

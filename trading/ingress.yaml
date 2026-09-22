@@ -21,7 +21,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: trading-dashboard-lb
+                name: trading-dashboard
                 port:
                   number: 80
   tls:

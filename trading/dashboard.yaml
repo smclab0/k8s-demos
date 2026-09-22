@@ -874,13 +874,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trading-dashboard-lb
+  name: trading-dashboard
   namespace: apps
-  # No metallb.universe.tf/loadBalancerIPs annotation here -- MetalLB
-  # auto-assigns from its pool. Pin a specific IP via a local overlay
-  # (see overlays/local/, not checked into git) if you want one.
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: trading-dashboard
   ports:
