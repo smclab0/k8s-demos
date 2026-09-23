@@ -2,7 +2,17 @@
 
 A minimal static site for testing this k8s cluster -- deployments, rollouts, scaling, Service load-balancing -- unrelated to the `trading/` demo.
 
-`nginx:1.27-alpine` serving one HTML page (`website.yaml`'s ConfigMap), rendered at pod startup by an `initContainer` that substitutes the pod name, node name, and pod IP into it via the downward API, so reloading the page shows which of the 3 replicas (and which node) answered -- useful for watching the Service spread load, or for seeing pods rotate out during a rollout or `kubectl drain`.
+Each of the 3 replica pods runs three containers:
+- `render` (`alpine`, init) -- substitutes the pod name, node name, and pod IP into the page template via the downward API, once at startup.
+- `nginx` (`nginx:1.27-alpine`) -- serves the rendered page and reverse-proxies `/api/` to the sidecar below. Sends `Cache-Control: no-store` on everything, so the page's own polling always reaches a live pod instead of a cache.
+- `api` (`python:3.12-alpine`) -- a small stdlib `http.server` sidecar exposing `GET /topology`, which queries the k8s API (via its mounted ServiceAccount token) for every node and every `app=website` pod on it, containers included.
+
+The page itself does the rest client-side, no manual reload needed:
+- **Served-by card** -- polls `/` every ~1.5s (cache-busted) and updates in place when the answering pod changes.
+- **Leaderboard** -- a live bar chart tallying hits per pod from those same polls. Each pod gets a fixed color the first time it's seen (from a colorblind-validated 4-hue set) and keeps it regardless of rank, so the bars can freely re-sort by count without repainting.
+- **Cluster topology** -- refetches `/api/topology` every ~4s and renders node > pod > container, highlighting whichever pod is currently answering. Nodes with no website pod scheduled show as empty, so scaling or draining a node is visible here too.
+
+RBAC (`rbac.yaml`): the `website` ServiceAccount can only `list` Pods (namespaced) and `list` Nodes (cluster-scoped, since nodes aren't namespaced) -- read-only, same narrow-grant pattern `trading/dashboard-rbac.yaml` uses.
 
 ## Deploying
 

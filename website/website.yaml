@@ -16,22 +16,24 @@ data:
         body {
           margin: 0;
           min-height: 100vh;
+          padding: 2.5rem 1rem;
           display: flex;
-          align-items: center;
           justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
           background: #0f172a;
           color: #e2e8f0;
         }
-        main {
-          max-width: 32rem;
-          padding: 2.5rem;
+        .page { width: 100%; max-width: 40rem; display: flex; flex-direction: column; gap: 1.25rem; }
+        .panel {
+          padding: 1.5rem 1.75rem;
           border-radius: 0.75rem;
           background: #1e293b;
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
-        h1 { margin-top: 0; font-size: 1.5rem; display: flex; align-items: center; gap: 0.6rem; }
-        p.lead { color: #94a3b8; }
+        h1 { margin: 0 0 0.5rem; font-size: 1.5rem; display: flex; align-items: center; gap: 0.6rem; }
+        h2 { margin: 0; font-size: 1rem; }
+        p.lead { color: #94a3b8; margin: 0; }
+        p.hint { margin: 0.35rem 0 0; font-size: 0.8rem; color: #64748b; }
         .live-dot {
           width: 0.6rem; height: 0.6rem; border-radius: 50%;
           background: #4ade80; flex: none;
@@ -45,7 +47,7 @@ data:
           display: grid;
           grid-template-columns: auto 1fr;
           gap: 0.5rem 1rem;
-          margin: 1.5rem 0 0;
+          margin: 1rem 0 0;
           font-size: 0.9rem;
           padding: 1rem;
           border-radius: 0.5rem;
@@ -54,30 +56,131 @@ data:
         dl.flash { background: #334155; }
         dt { color: #94a3b8; }
         dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
-        .hint { margin-top: 1.5rem; font-size: 0.85rem; color: #64748b; }
+
+        /* -- leaderboard bar chart -- */
+        .bars { display: flex; flex-direction: column; gap: 12px; margin-top: 1.1rem; }
+        .bar-row { display: grid; grid-template-columns: 7.5rem 1fr 2.5rem; align-items: center; gap: 0.75rem; }
+        .bar-label { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+        .bar-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; }
+        .bar-name {
+          font-family: ui-monospace, monospace; font-size: 0.78rem; color: #cbd5e1;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .bar-track { height: 20px; background: #0f172a; border-radius: 4px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 0 4px 4px 0; transition: width 0.4s ease, background 0.3s ease; }
+        .bar-value { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.8rem; color: #94a3b8; }
+        .leaderboard-empty { font-size: 0.85rem; color: #64748b; margin-top: 1rem; }
+
+        /* -- topology tree -- */
+        .topology { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.1rem; }
+        .node-card { border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.5rem; padding: 0.75rem 0.9rem; }
+        .node-title {
+          font-weight: 600; font-size: 0.82rem; color: #e2e8f0;
+          display: flex; align-items: center; gap: 0.45rem; margin: 0;
+        }
+        .node-title .node-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #475569; flex: none; }
+        .node-empty { font-size: 0.78rem; color: #64748b; font-style: italic; margin: 0.4rem 0 0; }
+        .pod-card {
+          margin: 0.5rem 0 0 1rem;
+          padding: 0.55rem 0.8rem;
+          border-radius: 0.4rem;
+          background: #0f172a;
+          border: 2px solid transparent;
+        }
+        .pod-card.current { border-color: #4ade80; }
+        .pod-name { font-family: ui-monospace, monospace; font-size: 0.76rem; color: #cbd5e1; }
+        .pod-name .current-tag { color: #4ade80; font-family: -apple-system, sans-serif; font-size: 0.68rem; margin-left: 0.4rem; }
+        .containers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+        .container-chip {
+          font-size: 0.7rem; padding: 0.18rem 0.55rem; border-radius: 999px;
+          background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8;
+        }
+        .container-chip.init { opacity: 0.7; }
+        .container-chip .cname { color: #e2e8f0; font-weight: 600; }
+        .topology-empty { font-size: 0.85rem; color: #64748b; }
       </style>
     </head>
     <body>
-      <main>
-        <h1><span class="live-dot"></span>Kubernetes Test Site</h1>
-        <p class="lead">A static demo site for testing this cluster -- deployments, rollouts, scaling, and Service load-balancing.</p>
-        <dl id="card">
-          <dt>Served by pod</dt><dd id="pod">__POD_NAME__</dd>
-          <dt>On node</dt><dd id="node">__NODE_NAME__</dd>
-          <dt>Pod IP</dt><dd id="ip">__POD_IP__</dd>
-          <dt>Pod changes seen</dt><dd id="changes">0</dd>
-        </dl>
-        <p class="hint">Polling every ~1.5s, bypassing cache -- the Service spreads requests across the 3 replicas, so this updates live as it lands on different pods.</p>
-      </main>
+      <div class="page">
+        <div class="panel">
+          <h1><span class="live-dot"></span>Kubernetes Test Site</h1>
+          <p class="lead">A static demo site for testing this cluster -- deployments, rollouts, scaling, and Service load-balancing.</p>
+          <dl id="card">
+            <dt>Served by pod</dt><dd id="pod">__POD_NAME__</dd>
+            <dt>On node</dt><dd id="node">__NODE_NAME__</dd>
+            <dt>Pod IP</dt><dd id="ip">__POD_IP__</dd>
+            <dt>Pod changes seen</dt><dd id="changes">0</dd>
+          </dl>
+          <p class="hint">Polling every ~1.5s, bypassing cache -- the Service spreads requests across replicas, so this updates live as it lands on different pods.</p>
+        </div>
+
+        <div class="panel">
+          <h2>Leaderboard</h2>
+          <p class="hint">Which pod has answered the most polls since you opened this page.</p>
+          <div id="leaderboard" class="bars"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Cluster topology</h2>
+          <p class="hint">Live from the k8s API: every node, every website pod on it, every container in that pod.</p>
+          <div id="topology" class="topology">Loading&hellip;</div>
+        </div>
+      </div>
+
       <script>
+        // Fixed categorical colors, assigned to a pod name the first time it's
+        // seen and never reassigned -- color follows the entity, not its rank,
+        // so the leaderboard can freely re-sort by count without repainting.
+        const PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500'];
+        const OVERFLOW_COLOR = '#64748b';
+        const podColors = {};
+        function colorFor(pod) {
+          if (!(pod in podColors)) {
+            const used = Object.keys(podColors).length;
+            podColors[pod] = used < PALETTE.length ? PALETTE[used] : OVERFLOW_COLOR;
+          }
+          return podColors[pod];
+        }
+        function shortName(pod) { return pod.split('-').pop(); }
+
         let lastPod = document.getElementById('pod').textContent;
         let changes = 0;
+        const hits = {};
+
+        function renderLeaderboard() {
+          const el = document.getElementById('leaderboard');
+          const pods = Object.keys(hits);
+          if (pods.length === 0) {
+            el.innerHTML = '<p class="leaderboard-empty">Waiting for the first poll&hellip;</p>';
+            return;
+          }
+          const max = Math.max(...pods.map((p) => hits[p]));
+          const ranked = pods.slice().sort((a, b) => hits[b] - hits[a]);
+          el.innerHTML = ranked.map((p) => {
+            const pct = max > 0 ? Math.max(4, Math.round((hits[p] / max) * 100)) : 0;
+            const color = colorFor(p);
+            return (
+              '<div class="bar-row">' +
+                '<span class="bar-label" title="' + p + '">' +
+                  '<span class="bar-dot" style="background:' + color + '"></span>' +
+                  '<span class="bar-name">' + shortName(p) + '</span>' +
+                '</span>' +
+                '<span class="bar-track"><span class="bar-fill" style="width:' + pct + '%;background:' + color + '"></span></span>' +
+                '<span class="bar-value">' + hits[p] + '</span>' +
+              '</div>'
+            );
+          }).join('');
+        }
+
         async function poll() {
           try {
             const res = await fetch('/?_=' + Date.now(), { cache: 'no-store' });
             const html = await res.text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const newPod = doc.getElementById('pod').textContent;
+            colorFor(newPod);
+            hits[newPod] = (hits[newPod] || 0) + 1;
+            renderLeaderboard();
             if (newPod !== lastPod) {
               changes++;
               document.getElementById('pod').textContent = newPod;
@@ -88,10 +191,66 @@ data:
               card.classList.add('flash');
               setTimeout(() => card.classList.remove('flash'), 500);
               lastPod = newPod;
+              renderTopology(); // pod just changed -- refresh which card is highlighted
             }
           } catch (e) { /* transient fetch error -- next poll will retry */ }
         }
+
+        const APP_NOTES = {
+          nginx: 'nginx web server',
+          render: 'renders index.html from downward-API values',
+        };
+
+        async function renderTopology() {
+          const el = document.getElementById('topology');
+          try {
+            const res = await fetch('/api/topology?_=' + Date.now(), { cache: 'no-store' });
+            const data = await res.json();
+            const nodes = data.nodes || [];
+            if (nodes.length === 0) {
+              el.innerHTML = '<p class="topology-empty">No node data yet&hellip;</p>';
+              return;
+            }
+            el.innerHTML = nodes.map((n) => {
+              const pods = n.pods || [];
+              const podsHtml = pods.length
+                ? pods.map((p) => {
+                    const isCurrent = p.name === lastPod;
+                    const chips = (p.containers || []).map((c) => {
+                      const note = APP_NOTES[c.name] ? ' &middot; ' + APP_NOTES[c.name] : '';
+                      const readyMark = c.ready ? '&#10003;' : '&hellip;';
+                      return (
+                        '<span class="container-chip ' + c.kind + '">' +
+                          readyMark + ' <span class="cname">' + c.name + '</span> (' + c.image + ')' + note +
+                        '</span>'
+                      );
+                    }).join('');
+                    return (
+                      '<div class="pod-card' + (isCurrent ? ' current' : '') + '">' +
+                        '<div class="pod-name">' + shortName(p.name) +
+                          (isCurrent ? '<span class="current-tag">&#9679; serving you now</span>' : '') +
+                        '</div>' +
+                        '<div class="containers">' + chips + '</div>' +
+                      '</div>'
+                    );
+                  }).join('')
+                : '<p class="node-empty">No website pod scheduled here right now.</p>';
+              return (
+                '<div class="node-card">' +
+                  '<p class="node-title"><span class="node-dot"></span>' + n.name + '</p>' +
+                  podsHtml +
+                '</div>'
+              );
+            }).join('');
+          } catch (e) {
+            el.innerHTML = '<p class="topology-empty">Topology temporarily unavailable&hellip;</p>';
+          }
+        }
+
+        renderLeaderboard();
+        renderTopology();
         setInterval(poll, 1500);
+        setInterval(renderTopology, 4000);
       </script>
     </body>
     </html>
@@ -111,10 +270,109 @@ data:
       root /usr/share/nginx/html;
       index index.html;
       add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+      location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+      }
       location / {
         try_files $uri $uri/ =404;
       }
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: website-api-script
+  namespace: apps
+data:
+  api.py: |
+    import json
+    import ssl
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    NAMESPACE = "apps"
+
+    def k8s_api_get(path):
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(
+            f"https://kubernetes.default.svc{path}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
+            return json.load(resp)
+
+    def container_status(pod, name, kind):
+        key = "initContainerStatuses" if kind == "init" else "containerStatuses"
+        for cs in pod.get("status", {}).get(key, []):
+            if cs.get("name") != name:
+                continue
+            if kind == "init":
+                state = cs.get("state", {})
+                return "terminated" in state and state["terminated"].get("reason") == "Completed"
+            return bool(cs.get("ready"))
+        return False
+
+    def get_topology():
+        try:
+            nodes_data = k8s_api_get("/api/v1/nodes")
+            node_names = sorted(n["metadata"]["name"] for n in nodes_data.get("items", []))
+        except Exception:
+            node_names = []
+
+        try:
+            pods_data = k8s_api_get(f"/api/v1/namespaces/{NAMESPACE}/pods?labelSelector=app%3Dwebsite")
+            pods = pods_data.get("items", [])
+        except Exception:
+            pods = []
+
+        by_node = {n: [] for n in node_names}
+        for pod in pods:
+            node = pod.get("spec", {}).get("nodeName") or "(unscheduled)"
+            by_node.setdefault(node, [])
+            containers = []
+            for c in pod.get("spec", {}).get("initContainers", []):
+                containers.append({
+                    "name": c["name"], "image": c["image"], "kind": "init",
+                    "ready": container_status(pod, c["name"], "init"),
+                })
+            for c in pod.get("spec", {}).get("containers", []):
+                containers.append({
+                    "name": c["name"], "image": c["image"], "kind": "main",
+                    "ready": container_status(pod, c["name"], "main"),
+                })
+            by_node[node].append({
+                "name": pod["metadata"]["name"],
+                "phase": pod.get("status", {}).get("phase"),
+                "containers": containers,
+            })
+
+        return {"nodes": [{"name": n, "pods": by_node.get(n, [])} for n in sorted(by_node)]}
+
+    class Handler(BaseHTTPRequestHandler):
+        def _json(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path.startswith("/topology"):
+                self._json(200, get_topology())
+            else:
+                self._json(404, {"error": "not found"})
+
+        def log_message(self, format, *args):
+            pass
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -133,6 +391,7 @@ spec:
       labels:
         app: website
     spec:
+      serviceAccountName: website
       initContainers:
         - name: render
           image: alpine:3.20
@@ -188,6 +447,19 @@ spec:
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
               readOnly: true
+        - name: api
+          image: python:3.12-alpine
+          command: ["python3", "/app/api.py"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: api-script
+              mountPath: /app
+              readOnly: true
       volumes:
         - name: template
           configMap:
@@ -195,6 +467,9 @@ spec:
         - name: nginx-conf
           configMap:
             name: website-nginx-conf
+        - name: api-script
+          configMap:
+            name: website-api-script
         - name: html
           emptyDir: {}
 ---

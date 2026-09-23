@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: website
+  namespace: apps
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: website-read-pods
+  namespace: apps
+rules:
+  # No resourceNames filter -- Pod names are dynamic (ReplicaSet-suffixed).
+  # This technically permits listing any namespace's pod metadata (names,
+  # node, container/image), same tradeoff trading-dashboard makes for nodes;
+  # the api sidecar filters to label app=website itself.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: website-read-pods
+  namespace: apps
+subjects:
+  - kind: ServiceAccount
+    name: website
+    namespace: apps
+roleRef:
+  kind: Role
+  name: website-read-pods
+  apiGroup: rbac.authorization.k8s.io
+---
+# Nodes are cluster-scoped, so listing them needs a ClusterRole even though
+# this ServiceAccount otherwise only touches things in the apps namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: website-read-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: website-read-nodes
+subjects:
+  - kind: ServiceAccount
+    name: website
+    namespace: apps
+roleRef:
+  kind: ClusterRole
+  name: website-read-nodes
+  apiGroup: rbac.authorization.k8s.io
