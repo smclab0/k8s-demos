@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: website-chaos
+  namespace: apps
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: website-chaos
+  namespace: apps
+rules:
+  # No resourceNames filter -- pod names are dynamic. This technically
+  # permits deleting any pod in the namespace, not just app=website ones;
+  # the script itself is what narrows the blast radius to app=website (see
+  # chaos.sh below). Same tradeoff website-read-pods (rbac.yaml) makes.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: website-chaos
+  namespace: apps
+subjects:
+  - kind: ServiceAccount
+    name: website-chaos
+    namespace: apps
+roleRef:
+  kind: Role
+  name: website-chaos
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website-chaos
+  namespace: apps
+  labels:
+    app: website-chaos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: website-chaos
+  template:
+    metadata:
+      labels:
+        # Deliberately not "app: website" -- it must never be able to pick
+        # and delete itself out of its own target list.
+        app: website-chaos
+    spec:
+      serviceAccountName: website-chaos
+      containers:
+        - name: chaos
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              apk add --no-cache curl jq >/tmp/apk.log 2>&1
+
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              API=https://kubernetes.default.svc
+              NS=apps
+
+              echo "website-chaos: killing a random app=website pod every 70s"
+              while true; do
+                sleep 70
+                PODS=$(curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
+                  "$API/api/v1/namespaces/$NS/pods?labelSelector=app%3Dwebsite" | jq -r '.items[].metadata.name')
+                COUNT=$(printf '%s\n' "$PODS" | grep -c .)
+                if [ "$COUNT" -eq 0 ]; then
+                  echo "$(date -u +%H:%M:%S) no app=website pods found, skipping this cycle"
+                  continue
+                fi
+                # $RANDOM (busybox ash builtin) advances its own PRNG state
+                # on every reference within this one long-lived shell, unlike
+                # awk's srand() reseeding from wall-clock time on each fresh
+                # invocation -- which produces the same pick if two calls
+                # land in the same second (verified this the hard way).
+                IDX=$(( (RANDOM % COUNT) + 1 ))
+                TARGET=$(printf '%s\n' "$PODS" | sed -n "${IDX}p")
+                echo "$(date -u +%H:%M:%S) crashing pod $TARGET"
+                # gracePeriodSeconds=0 -- an actual crash, not a graceful
+                # SIGTERM shutdown, so this also exercises how the Service
+                # copes with a backend vanishing mid-connection.
+                curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
+                  -X DELETE "$API/api/v1/namespaces/$NS/pods/$TARGET?gracePeriodSeconds=0"
+                echo
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

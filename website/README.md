@@ -1,6 +1,6 @@
 # Website Demo
 
-A minimal static site for testing this k8s cluster -- deployments, rollouts, scaling, Service load-balancing -- unrelated to the `trading/` demo.
+A minimal static site for testing this k8s cluster -- deployments, rollouts, scaling, Service load-balancing, self-healing -- unrelated to the `trading/` demo.
 
 Each of the 3 replica pods runs three containers:
 - `render` (`alpine`, init) -- substitutes the pod name, node name, and pod IP into the page template via the downward API, once at startup.
@@ -16,6 +16,14 @@ The page itself does the rest client-side, no manual reload needed:
 - **Live DB traffic** -- the Redis box and its fan-in arrows flash blue with a `WRITE ↓` / `READ ↑` tag the instant a real request goes out: once per page load for the visit-counting `POST /api/visit`, and every ~5s for the counter-refreshing `GET /api/stats`. Not a decorative animation -- it only fires from an actual fetch resolving.
 
 RBAC (`rbac.yaml`): the `website` ServiceAccount can only `list` Pods (namespaced) and `list` Nodes (cluster-scoped, since nodes aren't namespaced) -- read-only, same narrow-grant pattern `trading/dashboard-rbac.yaml` uses. Talking to Redis doesn't need RBAC -- it's a plain Service connection, not a k8s API call.
+
+### Chaos (`chaos.yaml`)
+
+`website-chaos` is a separate single-replica Deployment (its own `app: website-chaos` label and ServiceAccount, so it can never target itself) that loops forever: sleep 70s, list pods labeled `app=website`, pick one at random (`$RANDOM` inside the one long-lived shell -- not `awk`'s `srand()`, which reseeds from wall-clock time and gives the *same* pick if two calls land in the same second), then `DELETE` it with `gracePeriodSeconds=0` -- an actual crash, not a graceful shutdown, so it also exercises how the Service copes with a backend vanishing mid-connection. Only ever touches `app=website` pods -- never `website-redis`, never anything in `trading/` -- and the Deployment controller recreates whatever it kills within a couple seconds, so the 3-replica count self-heals continuously. Its Role can technically `delete` any pod in the namespace (no `resourceNames` filter, same tradeoff as `website-read-pods`); the label scoping happens in the script, not RBAC.
+
+To pause it without tearing it down: `kubectl scale deployment/website-chaos -n apps --replicas=0`.
+
+Watch it happen: `kubectl logs -n apps deploy/website-chaos -f` (logs the pod name and timestamp of every kill), alongside `kubectl get pods -n apps -l app=website -w`.
 
 ## Deploying
 

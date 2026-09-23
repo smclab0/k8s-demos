@@ -6,6 +6,7 @@ resources:
   - rbac.yaml
   - redis.yaml
   - website.yaml
+  - chaos.yaml
   - ingress.yaml
 
 labels:
