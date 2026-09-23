@@ -141,6 +141,21 @@ data:
           return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
         function shortHost(name) { return name.split('.')[0]; }
+        function shortOs(os) {
+          if (!os) return 'OS unknown';
+          const abbrev = [
+            [/SUSE Linux Enterprise Server\s*/i, 'SLES '],
+            [/Red Hat Enterprise Linux\s*/i, 'RHEL '],
+            [/CentOS Linux\s*/i, 'CentOS '],
+            [/Debian GNU\/Linux\s*/i, 'Debian '],
+            [/Ubuntu\s*/i, 'Ubuntu '],
+            [/Flatcar Container Linux by Kinvolk\s*/i, 'Flatcar '],
+            [/Amazon Linux\s*/i, 'AL '],
+          ];
+          let s = os;
+          for (const [re, repl] of abbrev) s = s.replace(re, repl);
+          return s.length > 20 ? s.slice(0, 19) + '…' : s;
+        }
 
         // Draws the actual request path -- browser -> ingress -> Service,
         // fanning out to every pod the Service can route to, laid out under
@@ -258,11 +273,16 @@ data:
               });
             }
 
+            const osTitle = esc(node.os || 'OS unknown');
             parts.push(
               '<rect x="' + nodeX + '" y="' + nodeRowY + '" width="' + colW + '" height="' + nodeBoxH + '" rx="8" ' +
                 'fill="#0f172a" fill-opacity="0.5" stroke="#334155" stroke-width="1.5"/>' +
-              '<text x="' + (nodeX + colW / 2) + '" y="' + (nodeRowY + 17) + '" text-anchor="middle" ' +
-                'font-size="10" fill="#94a3b8">' + esc(shortHost(node.name)) + '</text>'
+              '<text x="' + (nodeX + colW / 2) + '" y="' + (nodeRowY + 16) + '" text-anchor="middle" ' +
+                'font-size="10" fill="#94a3b8">' + esc(shortHost(node.name)) + '</text>' +
+              '<g><title>' + osTitle + '</title>' +
+                '<text x="' + (nodeX + colW / 2) + '" y="' + (nodeRowY + 28) + '" text-anchor="middle" ' +
+                  'font-size="8" fill="#64748b">' + esc(shortOs(node.os)) + '</text>' +
+              '</g>'
             );
 
             if (pods.length === 0) {
@@ -273,7 +293,7 @@ data:
               return;
             }
 
-            const podAreaY = nodeRowY + 30, podAreaH = nodeBoxH - 38;
+            const podAreaY = nodeRowY + 38, podAreaH = nodeBoxH - 46;
             const perPodH = podAreaH / pods.length;
             pods.forEach((p, j) => {
               const py = podAreaY + j * perPodH;
@@ -546,8 +566,13 @@ data:
     def get_topology():
         try:
             nodes_data = k8s_api_get("/api/v1/nodes")
-            node_names = sorted(n["metadata"]["name"] for n in nodes_data.get("items", []))
+            node_os = {
+                n["metadata"]["name"]: n.get("status", {}).get("nodeInfo", {}).get("osImage")
+                for n in nodes_data.get("items", [])
+            }
+            node_names = sorted(node_os)
         except Exception:
+            node_os = {}
             node_names = []
 
         by_node = {n: [] for n in node_names}
@@ -566,7 +591,7 @@ data:
             database["pvc"] = {"name": "website-redis-data", "capacity": "256Mi", "storageClass": "longhorn"}
 
         return {
-            "nodes": [{"name": n, "pods": by_node.get(n, [])} for n in sorted(by_node)],
+            "nodes": [{"name": n, "os": node_os.get(n), "pods": by_node.get(n, [])} for n in sorted(by_node)],
             "database": database,
         }
 
