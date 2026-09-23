@@ -30,10 +30,16 @@ data:
           background: #1e293b;
           box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
         }
-        h1 { margin: 0 0 0.5rem; font-size: 1.5rem; display: flex; align-items: center; gap: 0.6rem; }
+        h1 { margin: 0 0 0.3rem; font-size: 1.5rem; display: flex; align-items: center; gap: 0.6rem; }
         h2 { margin: 0; font-size: 1rem; }
         p.lead { color: #94a3b8; margin: 0; }
         p.hint { margin: 0.35rem 0 0; font-size: 0.8rem; color: #64748b; }
+        .panel-header { padding: 0.9rem 1.1rem; }
+        .panel-header h1 { font-size: 1.05rem; margin-bottom: 0.15rem; }
+        .panel-header .live-dot { width: 0.45rem; height: 0.45rem; }
+        .panel-header p.lead { font-size: 0.78rem; }
+        .panel-header p.hint { font-size: 0.72rem; }
+        dl.compact { margin-top: 0.6rem; padding: 0.6rem 0.7rem; font-size: 0.78rem; gap: 0.3rem 0.75rem; }
         .live-dot {
           width: 0.6rem; height: 0.6rem; border-radius: 50%;
           background: #4ade80; flex: none;
@@ -66,10 +72,10 @@ data:
     </head>
     <body>
       <div class="page">
-        <div class="panel">
+        <div class="panel panel-header">
           <h1><span class="live-dot"></span>Kubernetes Test Site</h1>
           <p class="lead">A static demo site for testing this cluster -- deployments, rollouts, scaling, and Service load-balancing.</p>
-          <dl id="card">
+          <dl id="card" class="compact">
             <dt>Served by pod</dt><dd id="pod">__POD_NAME__</dd>
             <dt>On node</dt><dd id="node">__NODE_NAME__</dd>
             <dt>Pod IP</dt><dd id="ip">__POD_IP__</dd>
@@ -155,8 +161,15 @@ data:
           const browserY = 14, ingressY = browserY + boxH + gapV, serviceY = ingressY + boxH + gapV;
           const nodeRowY = serviceY + boxH + 58;
           const nodeBoxH = 156;
-          const height = nodeRowY + nodeBoxH + 16;
           const cx = width / 2;
+
+          const db = data.database || null;
+          const dbGapV = 56, dbBoxW = 220, dbBoxH = 46;
+          const pvcGap = 18, pvcRx = 20, pvcRy = 6, pvcBodyH = 18;
+          const dbRowY = nodeRowY + nodeBoxH + dbGapV;
+          const height = db
+            ? dbRowY + dbBoxH + pvcGap + pvcRy * 2 + pvcBodyH + 16
+            : nodeRowY + nodeBoxH + 16;
 
           const totalPods = nodes.reduce((sum, node) => sum + (node.pods || []).length, 0);
           const occupied = nodes.filter((node) => (node.pods || []).length > 0).length;
@@ -209,6 +222,21 @@ data:
             }
           }
 
+          // A flat database-cylinder icon: two ellipses (top open, bottom
+          // capped with the panel's own background so it reads as solid)
+          // joined by two straight sides -- the standard shorthand for
+          // "persistent storage", not a generic box.
+          function pvcIcon(x, y, rx, ry, bodyH, label) {
+            const bottomY = y + bodyH;
+            parts.push(
+              '<line x1="' + (x - rx) + '" y1="' + y + '" x2="' + (x - rx) + '" y2="' + bottomY + '" stroke="#475569" stroke-width="1.3"/>' +
+              '<line x1="' + (x + rx) + '" y1="' + y + '" x2="' + (x + rx) + '" y2="' + bottomY + '" stroke="#475569" stroke-width="1.3"/>' +
+              '<ellipse cx="' + x + '" cy="' + bottomY + '" rx="' + rx + '" ry="' + ry + '" fill="#1e293b" stroke="#475569" stroke-width="1.3"/>' +
+              '<ellipse cx="' + x + '" cy="' + y + '" rx="' + rx + '" ry="' + ry + '" fill="#0f172a" stroke="#475569" stroke-width="1.3"/>' +
+              '<text x="' + x + '" y="' + (bottomY + ry + 13) + '" text-anchor="middle" font-size="8.5" fill="#64748b">' + esc(label) + '</text>'
+            );
+          }
+
           box(cx - 60, browserY, 120, boxH, 'You (browser)', { fontSize: 10.5 });
           box(cx - 80, ingressY, 160, boxH, 'Ingress (traefik)', { fontSize: 10.5 });
           box(cx - 100, serviceY, 200, boxH, 'Service: website', { fontSize: 11 });
@@ -216,10 +244,12 @@ data:
           arrow(cx, browserY + boxH, cx, ingressY, { label: 'HTTPS' });
           arrow(cx, ingressY + boxH, cx, serviceY, { label: 'proxies to' });
 
+          const occupiedCenters = [];
           nodes.forEach((node, i) => {
             const nodeX = marginX + i * (colW + colGap);
             const pods = node.pods || [];
             const current = pods.find((p) => p.name === lastPod);
+            if (pods.length > 0) occupiedCenters.push(nodeX + colW / 2);
 
             if (pods.length > 0) {
               arrow(cx, serviceY + boxH, nodeX + colW / 2, nodeRowY, {
@@ -276,9 +306,38 @@ data:
             });
           });
 
+          if (db) {
+            const dbX = cx - dbBoxW / 2;
+            // Every app pod's api container is what actually talks to Redis
+            // (see the container list above) -- draw the fan-in from the
+            // nodes that have one, not from the Service, since the Service
+            // never routes here.
+            occupiedCenters.forEach((x) => arrow(x, nodeRowY + nodeBoxH, cx, dbRowY, {}));
+            parts.push(
+              '<text x="' + cx + '" y="' + (dbRowY - 8) + '" text-anchor="middle" font-size="8.5" ' +
+                'fill="#64748b">every pod’s api container reads &amp; writes here</text>'
+            );
+
+            const dbReady = (db.containers || []).some((c) => c.name === 'redis' && c.ready);
+            parts.push(
+              '<rect x="' + dbX + '" y="' + dbRowY + '" width="' + dbBoxW + '" height="' + dbBoxH + '" rx="7" ' +
+                'fill="#c98500" fill-opacity="0.1" stroke="#c98500" stroke-width="1.5"/>' +
+              '<circle cx="' + (dbX + 16) + '" cy="' + (dbRowY + 16) + '" r="3" fill="' + (dbReady ? '#4ade80' : '#475569') + '"/>' +
+              '<text x="' + (dbX + 24) + '" y="' + (dbRowY + 19) + '" font-size="10.5" fill="#e2e8f0">Redis (website-redis)</text>' +
+              '<text x="' + (dbX + 24) + '" y="' + (dbRowY + 34) + '" font-size="8.5" fill="#94a3b8">on ' + esc(shortHost(db.node || '?')) + '</text>'
+            );
+            if (db.pvc) {
+              const pvcLabel = db.pvc.name + ' — ' + db.pvc.capacity + ' (' + db.pvc.storageClass + ')';
+              parts.push('<text x="' + (dbX + dbBoxW - 10) + '" y="' + (dbRowY + 19) + '" text-anchor="end" font-size="8" fill="#64748b">' + esc(db.pvc.capacity) + '</text>');
+              arrow(cx, dbRowY + dbBoxH, cx, dbRowY + dbBoxH + pvcGap, {});
+              pvcIcon(cx, dbRowY + dbBoxH + pvcGap, pvcRx, pvcRy, pvcBodyH, pvcLabel);
+            }
+          }
+
           const label = esc(
             'Browser to traefik to the website Service, fanning out to ' + totalPods +
-            ' pod(s) across ' + occupied + ' of ' + n + ' node(s). Green marks the path your last poll took.'
+            ' pod(s) across ' + occupied + ' of ' + n + ' node(s), all reading and writing the visit ' +
+            'counter in Redis on a persistent volume. Green marks the path your last poll took.'
           );
           return (
             '<figure class="topo-figure">' +
@@ -408,6 +467,32 @@ data:
             return bool(cs.get("ready"))
         return False
 
+    def pod_summary(pod):
+        containers = []
+        for c in pod.get("spec", {}).get("initContainers", []):
+            containers.append({
+                "name": c["name"], "image": c["image"], "kind": "init",
+                "ready": container_status(pod, c["name"], "init"),
+            })
+        for c in pod.get("spec", {}).get("containers", []):
+            containers.append({
+                "name": c["name"], "image": c["image"], "kind": "main",
+                "ready": container_status(pod, c["name"], "main"),
+            })
+        return {
+            "name": pod["metadata"]["name"],
+            "node": pod.get("spec", {}).get("nodeName"),
+            "phase": pod.get("status", {}).get("phase"),
+            "containers": containers,
+        }
+
+    def list_pods(label_selector):
+        try:
+            data = k8s_api_get(f"/api/v1/namespaces/{NAMESPACE}/pods?labelSelector={label_selector}")
+            return data.get("items", [])
+        except Exception:
+            return []
+
     def get_topology():
         try:
             nodes_data = k8s_api_get("/api/v1/nodes")
@@ -415,34 +500,25 @@ data:
         except Exception:
             node_names = []
 
-        try:
-            pods_data = k8s_api_get(f"/api/v1/namespaces/{NAMESPACE}/pods?labelSelector=app%3Dwebsite")
-            pods = pods_data.get("items", [])
-        except Exception:
-            pods = []
-
         by_node = {n: [] for n in node_names}
-        for pod in pods:
-            node = pod.get("spec", {}).get("nodeName") or "(unscheduled)"
+        for pod in list_pods("app%3Dwebsite"):
+            summary = pod_summary(pod)
+            node = summary["node"] or "(unscheduled)"
             by_node.setdefault(node, [])
-            containers = []
-            for c in pod.get("spec", {}).get("initContainers", []):
-                containers.append({
-                    "name": c["name"], "image": c["image"], "kind": "init",
-                    "ready": container_status(pod, c["name"], "init"),
-                })
-            for c in pod.get("spec", {}).get("containers", []):
-                containers.append({
-                    "name": c["name"], "image": c["image"], "kind": "main",
-                    "ready": container_status(pod, c["name"], "main"),
-                })
-            by_node[node].append({
-                "name": pod["metadata"]["name"],
-                "phase": pod.get("status", {}).get("phase"),
-                "containers": containers,
-            })
+            by_node[node].append(summary)
 
-        return {"nodes": [{"name": n, "pods": by_node.get(n, [])} for n in sorted(by_node)]}
+        redis_pods = list_pods("app%3Dwebsite-redis")
+        database = pod_summary(redis_pods[0]) if redis_pods else None
+        if database:
+            # Static, not queried live -- the PVC's size/class rarely change,
+            # and it would need RBAC this ServiceAccount deliberately doesn't
+            # have (see rbac.yaml). Keep in sync with redis.yaml by hand.
+            database["pvc"] = {"name": "website-redis-data", "capacity": "256Mi", "storageClass": "longhorn"}
+
+        return {
+            "nodes": [{"name": n, "pods": by_node.get(n, [])} for n in sorted(by_node)],
+            "database": database,
+        }
 
     class Handler(BaseHTTPRequestHandler):
         def _json(self, code, payload):
