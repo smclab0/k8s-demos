@@ -174,8 +174,24 @@ data:
           const boxH = 32, gapV = 44;
           const browserY = 14, ingressY = browserY + boxH + gapV, serviceY = ingressY + boxH + gapV;
           const nodeRowY = serviceY + boxH + 58;
-          const nodeBoxH = 156;
           const cx = width / 2;
+
+          // Each pod gets a fixed-height slot (room for its name row plus up
+          // to 3 container rows) regardless of how many other pods share its
+          // node -- website-load.yaml can burst this to 10 replicas across 5
+          // nodes, and dividing a fixed box height by pod count (the old
+          // approach) squeezed names into overlapping mush once a node had
+          // more than one or two. The box grows to fit the pods, stacked
+          // vertically, instead of the pods shrinking to fit the box. Every
+          // node column uses the same height (the tallest node's), so the
+          // row still reads as a grid.
+          const HEADER_H = 40, POD_UNIT_H = 62, POD_GAP = 8, MIN_NODE_BOX_H = 156;
+          function nodeBoxHeightFor(node) {
+            const count = (node.pods || []).length;
+            if (count === 0) return MIN_NODE_BOX_H;
+            return Math.max(MIN_NODE_BOX_H, HEADER_H + count * POD_UNIT_H + (count - 1) * POD_GAP + 10);
+          }
+          const nodeBoxH = Math.max(MIN_NODE_BOX_H, ...nodes.map(nodeBoxHeightFor));
 
           const db = data.database || null;
           const dbGapV = 56, dbBoxW = 220, dbBoxH = 46;
@@ -293,11 +309,10 @@ data:
               return;
             }
 
-            const podAreaY = nodeRowY + 38, podAreaH = nodeBoxH - 46;
-            const perPodH = podAreaH / pods.length;
+            const podAreaY = nodeRowY + HEADER_H;
             pods.forEach((p, j) => {
-              const py = podAreaY + j * perPodH;
-              const ph = perPodH - (pods.length > 1 ? 6 : 0);
+              const py = podAreaY + j * (POD_UNIT_H + POD_GAP);
+              const ph = POD_UNIT_H;
               const isCurrent = p.name === lastPod;
               // Status color, not identity -- green/red only ever mean
               // "passes k8s's Ready condition" here. The check/cross glyph
@@ -643,20 +658,22 @@ spec:
         app: website
     spec:
       serviceAccountName: website
-      # Required (not preferred) anti-affinity on hostname -- the scheduler
-      # will only place a website pod on a node that doesn't already have
-      # one. So when chaos crashes a pod, its replacement can't land back
-      # on a node another replica already occupies; it has to go to a free
-      # one. 5 nodes for 3 replicas, so there's always room for this to be
-      # satisfiable -- it'd start blocking scheduling if replicas ever
-      # exceeded node count.
+      # Preferred, not required -- website-load.yaml scales this to 10
+      # replicas on a 5-node cluster every 5 minutes, which a *required*
+      # anti-affinity would make unsatisfiable (5 pods stuck Pending
+      # forever, since there aren't 10 distinct nodes). Preferred still
+      # spreads pods across free nodes whenever the scheduler can (so a
+      # chaos-crashed pod's replacement still prefers an empty node), it
+      # just stops blocking once nodes run out.
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: website
-              topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: website
+                topologyKey: kubernetes.io/hostname
       initContainers:
         - name: render
           image: alpine:3.20
