@@ -57,20 +57,6 @@ data:
         dt { color: #94a3b8; }
         dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
 
-        /* -- leaderboard bar chart -- */
-        .bars { display: flex; flex-direction: column; gap: 12px; margin-top: 1.1rem; }
-        .bar-row { display: grid; grid-template-columns: 7.5rem 1fr 2.5rem; align-items: center; gap: 0.75rem; }
-        .bar-label { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
-        .bar-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; }
-        .bar-name {
-          font-family: ui-monospace, monospace; font-size: 0.78rem; color: #cbd5e1;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .bar-track { height: 20px; background: #0f172a; border-radius: 4px; overflow: hidden; }
-        .bar-fill { height: 100%; border-radius: 0 4px 4px 0; transition: width 0.4s ease, background 0.3s ease; }
-        .bar-value { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.8rem; color: #94a3b8; }
-        .leaderboard-empty { font-size: 0.85rem; color: #64748b; margin-top: 1rem; }
-
         /* -- topology network diagram -- */
         .topo-figure { margin: 1.1rem 0 0; }
         .topo-svg { width: 100%; height: auto; display: block; }
@@ -93,12 +79,6 @@ data:
         </div>
 
         <div class="panel">
-          <h2>Leaderboard</h2>
-          <p class="hint">Which pod has answered the most polls since you opened this page.</p>
-          <div id="leaderboard" class="bars"></div>
-        </div>
-
-        <div class="panel">
           <h2>Cluster topology</h2>
           <p class="hint">The actual request path, drawn live from the k8s API.</p>
           <div id="topology">Loading&hellip;</div>
@@ -106,9 +86,9 @@ data:
       </div>
 
       <script>
-        // Fixed categorical colors, assigned to a pod name the first time it's
-        // seen and never reassigned -- color follows the entity, not its rank,
-        // so the leaderboard can freely re-sort by count without repainting.
+        // Fixed categorical colors, assigned to a pod name the first time
+        // it's seen and never reassigned -- ties each pod box in the
+        // topology diagram below to a stable identity color.
         const PALETTE = ['#3987e5', '#d95926', '#199e70', '#c98500'];
         const OVERFLOW_COLOR = '#64748b';
         const podColors = {};
@@ -123,32 +103,6 @@ data:
 
         let lastPod = document.getElementById('pod').textContent;
         let changes = 0;
-        const hits = {};
-
-        function renderLeaderboard() {
-          const el = document.getElementById('leaderboard');
-          const pods = Object.keys(hits);
-          if (pods.length === 0) {
-            el.innerHTML = '<p class="leaderboard-empty">Waiting for the first poll&hellip;</p>';
-            return;
-          }
-          const max = Math.max(...pods.map((p) => hits[p]));
-          const ranked = pods.slice().sort((a, b) => hits[b] - hits[a]);
-          el.innerHTML = ranked.map((p) => {
-            const pct = max > 0 ? Math.max(4, Math.round((hits[p] / max) * 100)) : 0;
-            const color = colorFor(p);
-            return (
-              '<div class="bar-row">' +
-                '<span class="bar-label" title="' + p + '">' +
-                  '<span class="bar-dot" style="background:' + color + '"></span>' +
-                  '<span class="bar-name">' + shortName(p) + '</span>' +
-                '</span>' +
-                '<span class="bar-track"><span class="bar-fill" style="width:' + pct + '%;background:' + color + '"></span></span>' +
-                '<span class="bar-value">' + hits[p] + '</span>' +
-              '</div>'
-            );
-          }).join('');
-        }
 
         async function poll() {
           try {
@@ -157,8 +111,6 @@ data:
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const newPod = doc.getElementById('pod').textContent;
             colorFor(newPod);
-            hits[newPod] = (hits[newPod] || 0) + 1;
-            renderLeaderboard();
             if (newPod !== lastPod) {
               changes++;
               document.getElementById('pod').textContent = newPod;
@@ -348,7 +300,6 @@ data:
           }
         }
 
-        renderLeaderboard();
         renderTopology();
         setInterval(poll, 1500);
         setInterval(renderTopology, 4000);
