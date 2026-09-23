@@ -68,3 +68,29 @@ spec:
   ports:
     - port: 6379
       targetPort: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: website-redis
+  namespace: apps
+spec:
+  # Selecting website-redis at all flips it to default-deny for the
+  # direction(s) listed below (Ingress only here) -- every other pod in the
+  # namespace, including trading/'s own unrelated redis and anything else
+  # sharing this namespace, loses access unless explicitly allowed. Egress
+  # from website-redis itself is untouched (no egress policyType), so its
+  # own outbound traffic, if any, is unaffected.
+  podSelector:
+    matchLabels:
+      app: website-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: website
+      ports:
+        - protocol: TCP
+          port: 6379
