@@ -85,11 +85,18 @@ spec:
                 IDX=$(( (RANDOM % COUNT) + 1 ))
                 TARGET=$(printf '%s\n' "$PODS" | sed -n "${IDX}p")
                 echo "$(date -u +%H:%M:%S) crashing pod $TARGET"
-                # gracePeriodSeconds=0 -- an actual crash, not a graceful
-                # SIGTERM shutdown, so this also exercises how the Service
-                # copes with a backend vanishing mid-connection.
+                # A plain graceful delete, not gracePeriodSeconds=0. That
+                # force-kill was the actual cause of real "site unavailable"
+                # windows: the endpoints controller removes a pod from the
+                # Service the moment deletionTimestamp is set (immediately,
+                # before the grace period even starts), so a graceful delete
+                # already stops new traffic to it right away -- the force-kill
+                # bought nothing except also severing whatever request was
+                # already in flight to that pod. Self-healing is still fully
+                # visible (the pod still dies and gets replaced); this just
+                # stops it from being disruptive to watch happen.
                 curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
-                  -X DELETE "$API/api/v1/namespaces/$NS/pods/$TARGET?gracePeriodSeconds=0"
+                  -X DELETE "$API/api/v1/namespaces/$NS/pods/$TARGET"
                 echo
               done
           resources:
