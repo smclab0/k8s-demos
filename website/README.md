@@ -4,7 +4,7 @@ A minimal static site for testing this k8s cluster -- deployments, rollouts, sca
 
 Inspired by [stevemc-suse/rancher-k3s-fleet-examples](https://github.com/stevemc-suse/rancher-k3s-fleet-examples/tree/master/fleet-examples).
 
-`website` is a Deployment with 3 replicas. Each pod runs three containers:
+`website` is a Deployment with 3 replicas and a **required** pod anti-affinity on `kubernetes.io/hostname` -- the scheduler will only place a website pod on a node that doesn't already have one. So when `website-chaos` crashes a pod, the replacement can't land back on a node another replica already occupies; it has to go to a currently-free one. Verified against the live cluster through two real chaos kills in a row: both replacements landed on nodes that were actually free, never doubling up (5 nodes, 3 replicas, so this is always satisfiable -- it'd start blocking scheduling if replicas ever exceeded node count). Each pod runs three containers:
 - `render` (`alpine`, init) -- substitutes the pod name, node name, and pod IP into the page template via the downward API, once at startup.
 - `nginx` (`nginx:1.27-alpine`) -- serves the rendered page and reverse-proxies `/api/` to the sidecar below. Sends `Cache-Control: no-store` on everything, so the page's own polling always reaches a live pod instead of a cache.
 - `api` (`python:3.12-alpine`) -- a small stdlib `http.server` sidecar exposing `GET /topology`, `GET /stats`, and `POST /visit` (see below). Queries the k8s API (via its mounted ServiceAccount token) for topology, and talks to `website-redis` for the visit counter.

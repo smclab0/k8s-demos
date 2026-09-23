@@ -618,6 +618,20 @@ spec:
         app: website
     spec:
       serviceAccountName: website
+      # Required (not preferred) anti-affinity on hostname -- the scheduler
+      # will only place a website pod on a node that doesn't already have
+      # one. So when chaos crashes a pod, its replacement can't land back
+      # on a node another replica already occupies; it has to go to a free
+      # one. 5 nodes for 3 replicas, so there's always room for this to be
+      # satisfiable -- it'd start blocking scheduling if replicas ever
+      # exceeded node count.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: website
+              topologyKey: kubernetes.io/hostname
       initContainers:
         - name: render
           image: alpine:3.20
