@@ -2,7 +2,7 @@
 
 A minimal static site for testing this k8s cluster -- deployments, rollouts, scaling, Service load-balancing, self-healing -- unrelated to the `trading/` demo.
 
-Each of the 3 replica pods runs three containers:
+`website` is a DaemonSet, not a fixed replica count -- exactly one pod per node, so it uses every node in the cluster and adjusts itself if a node is added or removed. Each pod runs three containers:
 - `render` (`alpine`, init) -- substitutes the pod name, node name, and pod IP into the page template via the downward API, once at startup.
 - `nginx` (`nginx:1.27-alpine`) -- serves the rendered page and reverse-proxies `/api/` to the sidecar below. Sends `Cache-Control: no-store` on everything, so the page's own polling always reaches a live pod instead of a cache.
 - `api` (`python:3.12-alpine`) -- a small stdlib `http.server` sidecar exposing `GET /topology`, `GET /stats`, and `POST /visit` (see below). Queries the k8s API (via its mounted ServiceAccount token) for topology, and talks to `website-redis` for the visit counter.
