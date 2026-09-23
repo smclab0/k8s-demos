@@ -39,6 +39,29 @@ data:
         .panel-header .live-dot { width: 0.45rem; height: 0.45rem; }
         .panel-header p.lead { font-size: 0.78rem; }
         .panel-header p.hint { font-size: 0.72rem; }
+
+        .madness-btn {
+          margin-top: 0.75rem;
+          padding: 0.65rem 1.25rem;
+          border: none;
+          border-radius: 0.5rem;
+          background: linear-gradient(135deg, #f87171, #c026d3);
+          color: #fff;
+          font-weight: 700;
+          font-size: 0.85rem;
+          cursor: pointer;
+          transition: transform 0.15s ease, opacity 0.15s ease;
+        }
+        .madness-btn:hover:not(:disabled) { transform: scale(1.03); }
+        .madness-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .madness-status { margin-top: 0.75rem; display: none; }
+        .madness-status.show { display: block; }
+        .madness-bar { height: 10px; background: #0f172a; border-radius: 999px; overflow: hidden; }
+        .madness-bar-fill {
+          height: 100%; width: 0%; background: linear-gradient(90deg, #f87171, #c026d3);
+          transition: width 0.3s ease;
+        }
+        .madness-status p { margin: 0.4rem 0 0; }
         dl.compact { margin-top: 0.6rem; padding: 0.6rem 0.7rem; font-size: 0.78rem; gap: 0.3rem 0.75rem; }
         .live-dot {
           width: 0.6rem; height: 0.6rem; border-radius: 50%;
@@ -75,6 +98,17 @@ data:
         .topo-svg #db-box.pulse { stroke: #38bdf8; fill: #38bdf8; fill-opacity: 0.28; }
         .topo-svg #db-activity { opacity: 0; transition: opacity 0.15s ease; }
         .topo-svg #db-activity.show { opacity: 1; }
+        /* Traveling packet, browser -> ingress -> service. Fixed pixel
+           values (46 = browser box bottom, 166 = service box top) --
+           those three boxes sit on the same vertical line at every node
+           count, so this never needs to be regenerated per render. */
+        .topo-svg .packet { fill: #38bdf8; animation: packet-travel 2.2s linear infinite; }
+        @keyframes packet-travel {
+          0%   { cy: 46px;  opacity: 0; }
+          6%   { opacity: 1; }
+          94%  { opacity: 1; }
+          100% { cy: 166px; opacity: 0; }
+        }
         .topology-empty { font-size: 0.85rem; color: #64748b; }
       </style>
     </head>
@@ -91,6 +125,16 @@ data:
             <dt>Total visits (all-time)</dt><dd id="visits">&hellip;</dd>
           </dl>
           <p class="hint">Polling every ~1.5s, bypassing cache -- the Service spreads requests across replicas, so this updates live as it lands on different pods. Total visits is a counter in Redis (persistent volume), shared across every pod and every visitor.</p>
+        </div>
+
+        <div class="panel">
+          <h2>Danger zone</h2>
+          <p class="hint">Fires 10,000 requests at the site and scales <code>website</code> to 100 replicas for 60s, then back to 3. One run at a time, shared with everyone viewing this page right now.</p>
+          <button id="madness-btn" class="madness-btn">&#128293; Chaos to Madness</button>
+          <div id="madness-status" class="madness-status">
+            <div class="madness-bar"><div id="madness-bar-fill" class="madness-bar-fill"></div></div>
+            <p id="madness-text" class="hint"></p>
+          </div>
         </div>
 
         <div class="panel">
@@ -275,6 +319,14 @@ data:
           arrow(cx, browserY + boxH, cx, ingressY, { label: 'HTTPS' });
           arrow(cx, ingressY + boxH, cx, serviceY, { label: 'proxies to' });
 
+          // A traveling packet, browser -> ingress -> service. All three
+          // boxes sit on the same vertical line at cx regardless of node
+          // count, so a straight CSS-animated cy (browserY+boxH ->
+          // serviceY, fixed pixel values, no per-render JS needed) is
+          // enough -- no curved path required. Loops on its own via CSS;
+          // survives the 4s topology re-render same as any other element.
+          parts.push('<circle class="packet" cx="' + cx + '" r="4"/>');
+
           const occupiedCenters = [];
           nodes.forEach((node, i) => {
             const nodeX = marginX + i * (colW + colGap);
@@ -397,14 +449,27 @@ data:
           );
         }
 
+        let topologyEverRendered = false;
         async function renderTopology() {
           const el = document.getElementById('topology');
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
           try {
-            const res = await fetch('/api/topology?_=' + Date.now(), { cache: 'no-store' });
+            const res = await fetch('/api/topology?_=' + Date.now(), { cache: 'no-store', signal: controller.signal });
             const data = await res.json();
             el.innerHTML = buildTopologySVG(data);
+            topologyEverRendered = true;
           } catch (e) {
-            el.innerHTML = '<p class="topology-empty">Topology temporarily unavailable&hellip;</p>';
+            // A load burst (website-load scaling to 100, or chaos mid-kill)
+            // can make one poll miss -- the next one 4s later usually just
+            // works. Blanking out a perfectly good diagram over one flaky
+            // poll reads as broken; only show the placeholder if nothing
+            // has ever rendered yet (e.g. the very first load).
+            if (!topologyEverRendered) {
+              el.innerHTML = '<p class="topology-empty">Topology temporarily unavailable&hellip;</p>';
+            }
+          } finally {
+            clearTimeout(timeout);
           }
         }
 
@@ -452,8 +517,58 @@ data:
           } catch (e) { /* next refresh will retry */ }
         }
 
+        // "Chaos to madness": one button, shared state. Whoever clicks it
+        // starts the run for everyone currently on the page -- polling
+        // /api/madness (not a client-side timer) is what makes every open
+        // tab show the same live progress, including tabs that didn't
+        // click it themselves.
+        const madnessBtn = document.getElementById('madness-btn');
+        const madnessStatusEl = document.getElementById('madness-status');
+        const madnessBarFill = document.getElementById('madness-bar-fill');
+        const madnessText = document.getElementById('madness-text');
+        let madnessPollTimer = null;
+
+        function renderMadness(state) {
+          if (state.running) {
+            madnessBtn.disabled = true;
+            madnessBtn.textContent = 'Madness in progress…';
+            madnessStatusEl.classList.add('show');
+            const pct = state.total ? Math.min(100, Math.round((state.sent / state.total) * 100)) : 0;
+            madnessBarFill.style.width = pct + '%';
+            madnessText.textContent = state.phase + (state.total ? ' (' + state.sent + '/' + state.total + ')' : '');
+            if (!madnessPollTimer) madnessPollTimer = setInterval(pollMadness, 700);
+          } else {
+            madnessBtn.disabled = false;
+            madnessBtn.textContent = '\u{1F525} Chaos to Madness';
+            if (madnessPollTimer) { clearInterval(madnessPollTimer); madnessPollTimer = null; }
+            madnessStatusEl.classList.remove('show');
+          }
+        }
+
+        async function pollMadness() {
+          try {
+            const res = await fetch('/api/madness?_=' + Date.now(), { cache: 'no-store' });
+            renderMadness(await res.json());
+          } catch (e) { /* next poll will retry */ }
+        }
+
+        madnessBtn.addEventListener('click', async () => {
+          madnessBtn.disabled = true;
+          try {
+            const res = await fetch('/api/madness', { method: 'POST', cache: 'no-store' });
+            const data = await res.json();
+            renderMadness(data);
+            if (!data.started) {
+              madnessText.textContent = 'Already running (someone beat you to it) — showing live progress.';
+              madnessStatusEl.classList.add('show');
+              if (!madnessPollTimer) madnessPollTimer = setInterval(pollMadness, 700);
+            }
+          } catch (e) { madnessBtn.disabled = false; }
+        });
+
         recordVisit();
         renderTopology();
+        pollMadness(); // pick up an already-in-progress run from another visitor
         setInterval(poll, 1500);
         setInterval(renderTopology, 4000);
         setInterval(refreshVisits, 5000);
@@ -493,8 +608,11 @@ data:
   api.py: |
     import json
     import ssl
+    import threading
+    import time
     import urllib.request
     import redis
+    from concurrent.futures import ThreadPoolExecutor
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -529,6 +647,64 @@ data:
         )
         with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
             return json.load(resp)
+
+    def scale_website(replicas):
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(
+            f"https://kubernetes.default.svc/apis/apps/v1/namespaces/{NAMESPACE}/deployments/website/scale",
+            method="PATCH",
+            data=json.dumps({"spec": {"replicas": replicas}}).encode(),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/merge-patch+json",
+            },
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=5):
+            pass
+
+    MADNESS_TOTAL = 10000
+    MADNESS_REPLICAS = 100
+    MADNESS_HOLD_SECS = 60
+    _madness_lock = threading.Lock()
+    _madness_state = {"running": False, "sent": 0, "total": 0, "phase": ""}
+
+    def _fire_one():
+        try:
+            with urllib.request.urlopen("http://website.apps.svc.cluster.local/", timeout=3):
+                pass
+        except Exception:
+            pass  # a handful of failed requests under 100x load is expected, not fatal
+
+    def _run_madness():
+        try:
+            _madness_state.update(running=True, sent=0, total=MADNESS_TOTAL, phase="scaling up")
+            scale_website(MADNESS_REPLICAS)
+
+            _madness_state["phase"] = "firing requests"
+            with ThreadPoolExecutor(max_workers=80) as pool:
+                # as_completed via map -- just need the count, not results.
+                for _ in pool.map(lambda _: _fire_one(), range(MADNESS_TOTAL)):
+                    _madness_state["sent"] += 1
+
+            _madness_state["phase"] = f"holding at {MADNESS_REPLICAS} for {MADNESS_HOLD_SECS}s"
+            time.sleep(MADNESS_HOLD_SECS)
+
+            _madness_state["phase"] = "scaling back down"
+            scale_website(3)
+        except Exception as e:
+            _madness_state["phase"] = f"error: {e}"
+        finally:
+            _madness_state["running"] = False
+
+    def start_madness():
+        with _madness_lock:
+            if _madness_state["running"]:
+                return False
+            _madness_state["running"] = True  # claim it before the thread starts, avoid a race
+        threading.Thread(target=_run_madness, daemon=True).start()
+        return True
 
     def container_status(pod, name, kind):
         key = "initContainerStatuses" if kind == "init" else "containerStatuses"
@@ -625,12 +801,17 @@ data:
                 self._json(200, get_topology())
             elif self.path.startswith("/stats"):
                 self._json(200, {"visits": get_visits()})
+            elif self.path.startswith("/madness"):
+                self._json(200, dict(_madness_state))
             else:
                 self._json(404, {"error": "not found"})
 
         def do_POST(self):
             if self.path.startswith("/visit"):
                 self._json(200, {"visits": record_visit()})
+            elif self.path.startswith("/madness"):
+                started = start_madness()
+                self._json(200 if started else 409, dict(_madness_state, started=started))
             else:
                 self._json(404, {"error": "not found"})
 

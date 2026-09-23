@@ -32,6 +32,36 @@ roleRef:
   name: website-read-pods
   apiGroup: rbac.authorization.k8s.io
 ---
+# Backs the "chaos to madness" button (POST /api/madness): the api
+# sidecar scales website to 100 itself, so it needs to patch its own
+# Deployment's /scale subresource -- resourceName-restricted to
+# "website", same as website-load's identical grant for the same
+# subresource.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: website-scale-self
+  namespace: apps
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    resourceNames: ["website"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: website-scale-self
+  namespace: apps
+subjects:
+  - kind: ServiceAccount
+    name: website
+    namespace: apps
+roleRef:
+  kind: Role
+  name: website-scale-self
+  apiGroup: rbac.authorization.k8s.io
+---
 # Nodes are cluster-scoped, so listing them needs a ClusterRole even though
 # this ServiceAccount otherwise only touches things in the apps namespace.
 apiVersion: rbac.authorization.k8s.io/v1
