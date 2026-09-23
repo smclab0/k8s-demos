@@ -601,18 +601,14 @@ data:
         ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 ---
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: website
   namespace: apps
   labels:
     app: website
 spec:
-  # DaemonSet, not a fixed replica count -- exactly one website pod per
-  # node, always, so it uses every node in the cluster without needing a
-  # magic number that goes stale the moment a node is added or removed
-  # (no taints on any node here, control-plane included, so nothing needs
-  # a toleration to schedule).
+  replicas: 3
   selector:
     matchLabels:
       app: website
