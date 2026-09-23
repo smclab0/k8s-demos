@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: website
+  namespace: apps
+  annotations:
+    # Public ACME (Let's Encrypt/ZeroSSL) can't validate a hostname that
+    # resolves to a private RFC1918 address -- using the cluster's internal
+    # CA instead, same pattern every other app here already uses.
+    cert-manager.io/cluster-issuer: lenny-internal-ca-issuer
+spec:
+  ingressClassName: traefik
+  rules:
+    # website.example.com is a placeholder -- deploy.sh replaces it with a
+    # live sslip.io hostname derived from the cluster's own traefik
+    # LoadBalancer IP at apply time. See README.md.
+    - host: website.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: website
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - website.example.com
+      secretName: website-tls

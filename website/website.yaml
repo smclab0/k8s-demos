@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: website-html
+  namespace: apps
+data:
+  index.html.tmpl: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Kubernetes Test Site</title>
+      <style>
+        :root { color-scheme: light dark; }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: #0f172a;
+          color: #e2e8f0;
+        }
+        main {
+          max-width: 32rem;
+          padding: 2.5rem;
+          border-radius: 0.75rem;
+          background: #1e293b;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        h1 { margin-top: 0; font-size: 1.5rem; }
+        p.lead { color: #94a3b8; }
+        dl {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 0.5rem 1rem;
+          margin: 1.5rem 0 0;
+          font-size: 0.9rem;
+        }
+        dt { color: #94a3b8; }
+        dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+        .hint { margin-top: 1.5rem; font-size: 0.85rem; color: #64748b; }
+      </style>
+    </head>
+    <body>
+      <main>
+        <h1>Kubernetes Test Site</h1>
+        <p class="lead">A static demo site for testing this cluster -- deployments, rollouts, scaling, and Service load-balancing.</p>
+        <dl>
+          <dt>Served by pod</dt><dd>__POD_NAME__</dd>
+          <dt>On node</dt><dd>__NODE_NAME__</dd>
+          <dt>Pod IP</dt><dd>__POD_IP__</dd>
+        </dl>
+        <p class="hint">Reload the page a few times -- the Service spreads requests across replicas, so "served by pod" should change.</p>
+      </main>
+    </body>
+    </html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website
+  namespace: apps
+  labels:
+    app: website
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: website
+  template:
+    metadata:
+      labels:
+        app: website
+    spec:
+      initContainers:
+        - name: render
+          image: alpine:3.20
+          command:
+            - sh
+            - -c
+            - |
+              sed -e "s/__POD_NAME__/${POD_NAME}/g" \
+                  -e "s/__NODE_NAME__/${NODE_NAME}/g" \
+                  -e "s/__POD_IP__/${POD_IP}/g" \
+                  /template/index.html.tmpl > /html/index.html
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          volumeMounts:
+            - name: template
+              mountPath: /template
+              readOnly: true
+            - name: html
+              mountPath: /html
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+      volumes:
+        - name: template
+          configMap:
+            name: website-html
+        - name: html
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: website
+  namespace: apps
+spec:
+  type: ClusterIP
+  selector:
+    app: website
+  ports:
+    - port: 80
+      targetPort: 80
