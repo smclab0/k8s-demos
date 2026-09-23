@@ -23,7 +23,7 @@ data:
           background: #0f172a;
           color: #e2e8f0;
         }
-        .page { width: 100%; max-width: 40rem; display: flex; flex-direction: column; gap: 1.25rem; }
+        .page { width: 100%; max-width: 56rem; display: flex; flex-direction: column; gap: 1.25rem; }
         .panel {
           padding: 1.5rem 1.75rem;
           border-radius: 0.75rem;
@@ -71,32 +71,10 @@ data:
         .bar-value { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.8rem; color: #94a3b8; }
         .leaderboard-empty { font-size: 0.85rem; color: #64748b; margin-top: 1rem; }
 
-        /* -- topology tree -- */
-        .topology { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1.1rem; }
-        .node-card { border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 0.5rem; padding: 0.75rem 0.9rem; }
-        .node-title {
-          font-weight: 600; font-size: 0.82rem; color: #e2e8f0;
-          display: flex; align-items: center; gap: 0.45rem; margin: 0;
-        }
-        .node-title .node-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #475569; flex: none; }
-        .node-empty { font-size: 0.78rem; color: #64748b; font-style: italic; margin: 0.4rem 0 0; }
-        .pod-card {
-          margin: 0.5rem 0 0 1rem;
-          padding: 0.55rem 0.8rem;
-          border-radius: 0.4rem;
-          background: #0f172a;
-          border: 2px solid transparent;
-        }
-        .pod-card.current { border-color: #4ade80; }
-        .pod-name { font-family: ui-monospace, monospace; font-size: 0.76rem; color: #cbd5e1; }
-        .pod-name .current-tag { color: #4ade80; font-family: -apple-system, sans-serif; font-size: 0.68rem; margin-left: 0.4rem; }
-        .containers { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
-        .container-chip {
-          font-size: 0.7rem; padding: 0.18rem 0.55rem; border-radius: 999px;
-          background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.08); color: #94a3b8;
-        }
-        .container-chip.init { opacity: 0.7; }
-        .container-chip .cname { color: #e2e8f0; font-weight: 600; }
+        /* -- topology network diagram -- */
+        .topo-figure { margin: 1.1rem 0 0; }
+        .topo-svg { width: 100%; height: auto; display: block; }
+        .topo-figure figcaption { margin-top: 0.6rem; font-size: 0.78rem; color: #64748b; }
         .topology-empty { font-size: 0.85rem; color: #64748b; }
       </style>
     </head>
@@ -122,8 +100,8 @@ data:
 
         <div class="panel">
           <h2>Cluster topology</h2>
-          <p class="hint">Live from the k8s API: every node, every website pod on it, every container in that pod.</p>
-          <div id="topology" class="topology">Loading&hellip;</div>
+          <p class="hint">The actual request path, drawn live from the k8s API.</p>
+          <div id="topology">Loading&hellip;</div>
         </div>
       </div>
 
@@ -199,49 +177,172 @@ data:
         const APP_NOTES = {
           nginx: 'nginx web server',
           render: 'renders index.html from downward-API values',
+          api: 'serves this diagram’s data',
         };
+        function esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+        function shortHost(name) { return name.split('.')[0]; }
+
+        // Draws the actual request path -- browser -> ingress -> Service,
+        // fanning out to every pod the Service can route to, laid out under
+        // the node each pod is scheduled on. The one path a poll actually
+        // took (Service -> the pod that answered) is highlighted; nodes
+        // with no website pod are drawn empty on purpose, so a node falling
+        // out of the fan-out (e.g. cordoned, or just never scheduled onto)
+        // is visible, not omitted.
+        function buildTopologySVG(data) {
+          const nodes = data.nodes || [];
+          const n = nodes.length;
+          if (n === 0) return '<p class="topology-empty">No node data yet&hellip;</p>';
+
+          const marginX = 20, colGap = 18, colW = 150;
+          const width = marginX * 2 + n * colW + Math.max(0, n - 1) * colGap;
+          const boxH = 32, gapV = 44;
+          const browserY = 14, ingressY = browserY + boxH + gapV, serviceY = ingressY + boxH + gapV;
+          const nodeRowY = serviceY + boxH + 58;
+          const nodeBoxH = 156;
+          const height = nodeRowY + nodeBoxH + 16;
+          const cx = width / 2;
+
+          const totalPods = nodes.reduce((sum, node) => sum + (node.pods || []).length, 0);
+          const occupied = nodes.filter((node) => (node.pods || []).length > 0).length;
+
+          const parts = [];
+          parts.push(
+            '<defs>' +
+              '<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+                '<path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>' +
+              '</marker>' +
+              '<marker id="arrow-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+                '<path d="M0,0 L10,5 L0,10 z" fill="#4ade80"/>' +
+              '</marker>' +
+            '</defs>'
+          );
+
+          function box(x, y, w, h, label, opts) {
+            opts = opts || {};
+            const fill = opts.fill || '#0f172a';
+            const stroke = opts.stroke || '#475569';
+            const sw = opts.strokeWidth || 1.5;
+            const textFill = opts.textFill || '#e2e8f0';
+            const fs = opts.fontSize || 11;
+            parts.push(
+              '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="7" ' +
+                'fill="' + fill + '" fill-opacity="' + (opts.fillOpacity != null ? opts.fillOpacity : 1) + '" ' +
+                'stroke="' + stroke + '" stroke-width="' + sw + '"/>' +
+              '<text x="' + (x + w / 2) + '" y="' + (y + h / 2 + fs / 3) + '" text-anchor="middle" ' +
+                'font-size="' + fs + '" fill="' + textFill + '">' + esc(label) + '</text>'
+            );
+          }
+
+          function arrow(x1, y1, x2, y2, opts) {
+            opts = opts || {};
+            const live = !!opts.live;
+            parts.push(
+              '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+                'stroke="' + (live ? '#4ade80' : '#475569') + '" stroke-width="' + (live ? 2.5 : 1.4) + '" ' +
+                (live ? '' : 'stroke-opacity="0.6" ') +
+                'marker-end="url(#' + (live ? 'arrow-live' : 'arrow') + ')"/>'
+            );
+            if (opts.label) {
+              const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+              const anchorRight = mx >= cx;
+              parts.push(
+                '<text x="' + (mx + (anchorRight ? 8 : -8)) + '" y="' + (my - 4) + '" ' +
+                  'text-anchor="' + (anchorRight ? 'start' : 'end') + '" font-size="9.5" ' +
+                  'fill="' + (live ? '#4ade80' : '#64748b') + '">' + esc(opts.label) + '</text>'
+              );
+            }
+          }
+
+          box(cx - 60, browserY, 120, boxH, 'You (browser)', { fontSize: 10.5 });
+          box(cx - 80, ingressY, 160, boxH, 'Ingress (traefik)', { fontSize: 10.5 });
+          box(cx - 100, serviceY, 200, boxH, 'Service: website', { fontSize: 11 });
+
+          arrow(cx, browserY + boxH, cx, ingressY, { label: 'HTTPS' });
+          arrow(cx, ingressY + boxH, cx, serviceY, { label: 'proxies to' });
+
+          nodes.forEach((node, i) => {
+            const nodeX = marginX + i * (colW + colGap);
+            const pods = node.pods || [];
+            const current = pods.find((p) => p.name === lastPod);
+
+            if (pods.length > 0) {
+              arrow(cx, serviceY + boxH, nodeX + colW / 2, nodeRowY, {
+                live: !!current,
+                label: current ? 'answered you' : null,
+              });
+            }
+
+            parts.push(
+              '<rect x="' + nodeX + '" y="' + nodeRowY + '" width="' + colW + '" height="' + nodeBoxH + '" rx="8" ' +
+                'fill="#0f172a" fill-opacity="0.5" stroke="#334155" stroke-width="1.5"/>' +
+              '<text x="' + (nodeX + colW / 2) + '" y="' + (nodeRowY + 17) + '" text-anchor="middle" ' +
+                'font-size="10" fill="#94a3b8">' + esc(shortHost(node.name)) + '</text>'
+            );
+
+            if (pods.length === 0) {
+              parts.push(
+                '<text x="' + (nodeX + colW / 2) + '" y="' + (nodeRowY + nodeBoxH / 2 + 6) + '" ' +
+                  'text-anchor="middle" font-size="9.5" font-style="italic" fill="#475569">no pod here</text>'
+              );
+              return;
+            }
+
+            const podAreaY = nodeRowY + 30, podAreaH = nodeBoxH - 38;
+            const perPodH = podAreaH / pods.length;
+            pods.forEach((p, j) => {
+              const py = podAreaY + j * perPodH;
+              const ph = perPodH - (pods.length > 1 ? 6 : 0);
+              const isCurrent = p.name === lastPod;
+              const color = colorFor(p.name);
+              parts.push(
+                '<rect x="' + (nodeX + 8) + '" y="' + py + '" width="' + (colW - 16) + '" height="' + ph + '" rx="5" ' +
+                  'fill="' + color + '" fill-opacity="0.12" stroke="' + color + '" stroke-width="' + (isCurrent ? 2.2 : 1.2) + '"/>' +
+                '<circle cx="' + (nodeX + 17) + '" cy="' + (py + 11) + '" r="3" fill="' + color + '"/>' +
+                '<text x="' + (nodeX + 25) + '" y="' + (py + 14) + '" font-size="9" fill="#cbd5e1">' + esc(shortName(p.name)) + '</text>'
+              );
+              if (isCurrent) {
+                parts.push(
+                  '<text x="' + (nodeX + colW - 12) + '" y="' + (py + 14) + '" text-anchor="end" ' +
+                    'font-size="8" fill="#4ade80">&#9679; live</text>'
+                );
+              }
+              (p.containers || []).forEach((c, k) => {
+                const lineY = py + 28 + k * 13;
+                const dotColor = c.ready ? '#4ade80' : '#475569';
+                const title = esc(c.name + ' (' + c.image + ')' + (APP_NOTES[c.name] ? ' — ' + APP_NOTES[c.name] : ''));
+                parts.push(
+                  '<g><title>' + title + '</title>' +
+                    '<circle cx="' + (nodeX + 18) + '" cy="' + (lineY - 3) + '" r="2.5" fill="' + dotColor + '"/>' +
+                    '<text x="' + (nodeX + 25) + '" y="' + lineY + '" font-size="8.5" fill="#64748b">' + esc(c.name) + '</text>' +
+                  '</g>'
+                );
+              });
+            });
+          });
+
+          const label = esc(
+            'Browser to traefik to the website Service, fanning out to ' + totalPods +
+            ' pod(s) across ' + occupied + ' of ' + n + ' node(s). Green marks the path your last poll took.'
+          );
+          return (
+            '<figure class="topo-figure">' +
+              '<svg viewBox="0 0 ' + width + ' ' + height + '" class="topo-svg" role="img" aria-label="' + label + '">' +
+                parts.join('') +
+              '</svg>' +
+              '<figcaption>' + label + '</figcaption>' +
+            '</figure>'
+          );
+        }
 
         async function renderTopology() {
           const el = document.getElementById('topology');
           try {
             const res = await fetch('/api/topology?_=' + Date.now(), { cache: 'no-store' });
             const data = await res.json();
-            const nodes = data.nodes || [];
-            if (nodes.length === 0) {
-              el.innerHTML = '<p class="topology-empty">No node data yet&hellip;</p>';
-              return;
-            }
-            el.innerHTML = nodes.map((n) => {
-              const pods = n.pods || [];
-              const podsHtml = pods.length
-                ? pods.map((p) => {
-                    const isCurrent = p.name === lastPod;
-                    const chips = (p.containers || []).map((c) => {
-                      const note = APP_NOTES[c.name] ? ' &middot; ' + APP_NOTES[c.name] : '';
-                      const readyMark = c.ready ? '&#10003;' : '&hellip;';
-                      return (
-                        '<span class="container-chip ' + c.kind + '">' +
-                          readyMark + ' <span class="cname">' + c.name + '</span> (' + c.image + ')' + note +
-                        '</span>'
-                      );
-                    }).join('');
-                    return (
-                      '<div class="pod-card' + (isCurrent ? ' current' : '') + '">' +
-                        '<div class="pod-name">' + shortName(p.name) +
-                          (isCurrent ? '<span class="current-tag">&#9679; serving you now</span>' : '') +
-                        '</div>' +
-                        '<div class="containers">' + chips + '</div>' +
-                      '</div>'
-                    );
-                  }).join('')
-                : '<p class="node-empty">No website pod scheduled here right now.</p>';
-              return (
-                '<div class="node-card">' +
-                  '<p class="node-title"><span class="node-dot"></span>' + n.name + '</p>' +
-                  podsHtml +
-                '</div>'
-              );
-            }).join('');
+            el.innerHTML = buildTopologySVG(data);
           } catch (e) {
             el.innerHTML = '<p class="topology-empty">Topology temporarily unavailable&hellip;</p>';
           }

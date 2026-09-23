@@ -10,7 +10,7 @@ Each of the 3 replica pods runs three containers:
 The page itself does the rest client-side, no manual reload needed:
 - **Served-by card** -- polls `/` every ~1.5s (cache-busted) and updates in place when the answering pod changes.
 - **Leaderboard** -- a live bar chart tallying hits per pod from those same polls. Each pod gets a fixed color the first time it's seen (from a colorblind-validated 4-hue set) and keeps it regardless of rank, so the bars can freely re-sort by count without repainting.
-- **Cluster topology** -- refetches `/api/topology` every ~4s and renders node > pod > container, highlighting whichever pod is currently answering. Nodes with no website pod scheduled show as empty, so scaling or draining a node is visible here too.
+- **Cluster topology** -- refetches `/api/topology` every ~4s and draws it as a network diagram (hand-authored inline SVG, no charting library): browser to the traefik Ingress to the `website` Service, fanning out to every pod the Service can route to, grouped under the node each is scheduled on, containers listed inside each pod box (hover a container for its image). The one path an actual poll took -- Service to whichever pod answered -- is highlighted in green. Nodes with no website pod scheduled are drawn empty, so scaling or draining a node is visible here too.
 
 RBAC (`rbac.yaml`): the `website` ServiceAccount can only `list` Pods (namespaced) and `list` Nodes (cluster-scoped, since nodes aren't namespaced) -- read-only, same narrow-grant pattern `trading/dashboard-rbac.yaml` uses.
 
