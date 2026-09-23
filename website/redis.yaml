@@ -91,6 +91,15 @@ spec:
         - podSelector:
             matchLabels:
               app: website
+        # The "chaos to madness" run is a one-off Job (website.yaml's
+        # create_madness_job()), not a website pod -- it needs its own
+        # entry here to write progress into the website:madness hash.
+        # Deliberately its own label, not app: website, so it never
+        # matches the website Service's selector and starts receiving
+        # real traffic it can't serve.
+        - podSelector:
+            matchLabels:
+              app: website-madness
       ports:
         - protocol: TCP
           port: 6379

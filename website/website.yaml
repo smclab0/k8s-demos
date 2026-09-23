@@ -62,6 +62,39 @@ data:
           transition: width 0.3s ease;
         }
         .madness-status p { margin: 0.4rem 0 0; }
+
+        .chaos-control { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+        .chaos-control strong { font-size: 0.85rem; }
+        .chaos-control p.hint { margin: 0.15rem 0 0; }
+        .chaos-toggle-btn {
+          flex: none;
+          padding: 0.5rem 0.9rem;
+          border-radius: 0.5rem;
+          border: 1px solid #475569;
+          background: transparent;
+          color: #cbd5e1;
+          font-size: 0.78rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: border-color 0.15s ease, color 0.15s ease;
+        }
+        .chaos-toggle-btn:hover:not(:disabled) { border-color: #94a3b8; }
+        .chaos-toggle-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .chaos-toggle-btn.paused { border-color: #4ade80; color: #4ade80; }
+        .danger-divider { border: none; border-top: 1px solid rgba(255, 255, 255, 0.08); margin: 0.9rem 0; }
+
+        .madness-controls { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.6rem; flex-wrap: wrap; }
+        .madness-controls label { font-size: 0.78rem; color: #94a3b8; }
+        .madness-controls input[type="number"] {
+          width: 5.5rem;
+          padding: 0.35rem 0.5rem;
+          border-radius: 0.4rem;
+          border: 1px solid #475569;
+          background: #0f172a;
+          color: #e2e8f0;
+          font-size: 0.85rem;
+        }
+        .madness-preview { font-size: 0.78rem; color: #64748b; }
         dl.compact { margin-top: 0.6rem; padding: 0.6rem 0.7rem; font-size: 0.78rem; gap: 0.3rem 0.75rem; }
         .live-dot {
           width: 0.6rem; height: 0.6rem; border-radius: 50%;
@@ -129,8 +162,24 @@ data:
 
         <div class="panel">
           <h2>Danger zone</h2>
-          <p class="hint">Fires 10,000 requests at the site and scales <code>website</code> to 100 replicas for 60s, then back to 3. One run at a time, shared with everyone viewing this page right now.</p>
-          <button id="madness-btn" class="madness-btn">&#128293; Chaos to Madness</button>
+
+          <div class="chaos-control">
+            <div>
+              <strong>Random pod crashes</strong>
+              <p class="hint"><code>website-chaos</code> kills a random <code>website</code> pod every 70s.</p>
+            </div>
+            <button id="chaos-toggle-btn" class="chaos-toggle-btn">&hellip;</button>
+          </div>
+
+          <hr class="danger-divider">
+
+          <p class="hint">Choose how many requests to send -- the platform scales <code>website</code> up to accommodate them (roughly 1 pod per 10 requests, 3&ndash;100), holds for 60s, then scales back down. One run at a time, shared with everyone viewing this page right now.</p>
+          <div class="madness-controls">
+            <label for="madness-requests">Requests to send</label>
+            <input type="number" id="madness-requests" min="10" max="5000" step="10" value="500">
+            <span id="madness-preview" class="madness-preview"></span>
+          </div>
+          <button id="madness-btn" class="madness-btn">&#128293; Send the load</button>
           <div id="madness-status" class="madness-status">
             <div class="madness-bar"><div id="madness-bar-fill" class="madness-bar-fill"></div></div>
             <p id="madness-text" class="hint"></p>
@@ -152,12 +201,22 @@ data:
         const STATUS_CRITICAL = '#f87171';
         function shortName(pod) { return pod.split('-').pop(); }
 
+        // Every fetch this tab makes to the site is a real hop through
+        // browser -> ingress -> service -- routed through here so the
+        // topology diagram's "You (browser)" box can show a live count
+        // instead of just naming the hop.
+        let browserRequestCount = 0;
+        function trackedFetch(url, opts) {
+          browserRequestCount++;
+          return fetch(url, opts);
+        }
+
         let lastPod = document.getElementById('pod').textContent;
         let changes = 0;
 
         async function poll() {
           try {
-            const res = await fetch('/?_=' + Date.now(), { cache: 'no-store' });
+            const res = await trackedFetch('/?_=' + Date.now(), { cache: 'no-store' });
             const html = await res.text();
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const newPod = doc.getElementById('pod').textContent;
@@ -208,7 +267,7 @@ data:
         // with no website pod are drawn empty on purpose, so a node falling
         // out of the fan-out (e.g. cordoned, or just never scheduled onto)
         // is visible, not omitted.
-        function buildTopologySVG(data) {
+        function buildTopologySVG(data, browserRequests) {
           const nodes = data.nodes || [];
           const n = nodes.length;
           if (n === 0) return '<p class="topology-empty">No node data yet&hellip;</p>';
@@ -312,7 +371,16 @@ data:
             );
           }
 
-          box(cx - 60, browserY, 120, boxH, 'You (browser)', { fontSize: 10.5 });
+          // Custom two-line render (not the shared box() helper, which is
+          // one centered line) so the live request count sits right on
+          // the box it's counting requests from, not off to the side.
+          parts.push(
+            '<rect x="' + (cx - 60) + '" y="' + browserY + '" width="120" height="' + boxH + '" rx="7" ' +
+              'fill="#0f172a" stroke="#475569" stroke-width="1.5"/>' +
+            '<text x="' + cx + '" y="' + (browserY + 13) + '" text-anchor="middle" font-size="10" fill="#e2e8f0">You (browser)</text>' +
+            '<text x="' + cx + '" y="' + (browserY + 25) + '" text-anchor="middle" font-size="8.5" fill="#64748b">' +
+              esc((browserRequests || 0).toLocaleString()) + ' requests sent</text>'
+          );
           box(cx - 80, ingressY, 160, boxH, 'Ingress (traefik)', { fontSize: 10.5 });
           box(cx - 100, serviceY, 200, boxH, 'Service: website', { fontSize: 11 });
 
@@ -455,9 +523,9 @@ data:
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 3000);
           try {
-            const res = await fetch('/api/topology?_=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+            const res = await trackedFetch('/api/topology?_=' + Date.now(), { cache: 'no-store', signal: controller.signal });
             const data = await res.json();
-            el.innerHTML = buildTopologySVG(data);
+            el.innerHTML = buildTopologySVG(data, browserRequestCount);
             topologyEverRendered = true;
           } catch (e) {
             // A load burst (website-load scaling to 100, or chaos mid-kill)
@@ -502,7 +570,7 @@ data:
         // as a "visit" would make the number meaningless.
         async function recordVisit() {
           try {
-            const res = await fetch('/api/visit', { method: 'POST', cache: 'no-store' });
+            const res = await trackedFetch('/api/visit', { method: 'POST', cache: 'no-store' });
             const data = await res.json();
             pulseDb('write');
             if (data.visits != null) document.getElementById('visits').textContent = data.visits;
@@ -510,7 +578,7 @@ data:
         }
         async function refreshVisits() {
           try {
-            const res = await fetch('/api/stats?_=' + Date.now(), { cache: 'no-store' });
+            const res = await trackedFetch('/api/stats?_=' + Date.now(), { cache: 'no-store' });
             const data = await res.json();
             pulseDb('read');
             if (data.visits != null) document.getElementById('visits').textContent = data.visits;
@@ -521,25 +589,45 @@ data:
         // starts the run for everyone currently on the page -- polling
         // /api/madness (not a client-side timer) is what makes every open
         // tab show the same live progress, including tabs that didn't
-        // click it themselves.
+        // click it themselves. Requests drive the pod count, not the
+        // other way around -- this preview mirrors the server's own
+        // formula (replicas_for() in api.py) purely for display; the
+        // server always recomputes it itself rather than trusting this.
+        const MADNESS_REQUESTS_PER_POD = 10, MADNESS_MIN_REPLICAS = 3, MADNESS_MAX_REPLICAS = 100;
+        function previewReplicas(requests) {
+          return Math.min(MADNESS_MAX_REPLICAS, Math.max(MADNESS_MIN_REPLICAS, Math.round(requests / MADNESS_REQUESTS_PER_POD)));
+        }
+
         const madnessBtn = document.getElementById('madness-btn');
         const madnessStatusEl = document.getElementById('madness-status');
         const madnessBarFill = document.getElementById('madness-bar-fill');
         const madnessText = document.getElementById('madness-text');
+        const madnessRequestsInput = document.getElementById('madness-requests');
+        const madnessPreview = document.getElementById('madness-preview');
         let madnessPollTimer = null;
+
+        function updateMadnessPreview() {
+          const n = parseInt(madnessRequestsInput.value, 10) || 0;
+          madnessPreview.textContent = '≈ ' + previewReplicas(n) + ' pods';
+        }
+        madnessRequestsInput.addEventListener('input', updateMadnessPreview);
+        updateMadnessPreview();
 
         function renderMadness(state) {
           if (state.running) {
             madnessBtn.disabled = true;
+            madnessRequestsInput.disabled = true;
             madnessBtn.textContent = 'Madness in progress…';
             madnessStatusEl.classList.add('show');
             const pct = state.total ? Math.min(100, Math.round((state.sent / state.total) * 100)) : 0;
             madnessBarFill.style.width = pct + '%';
-            madnessText.textContent = state.phase + (state.total ? ' (' + state.sent + '/' + state.total + ')' : '');
+            const counts = state.total ? ' (' + state.sent + '/' + state.total + ' requests, ' + (state.replicas || '?') + ' pods)' : '';
+            madnessText.textContent = state.phase + counts;
             if (!madnessPollTimer) madnessPollTimer = setInterval(pollMadness, 700);
           } else {
             madnessBtn.disabled = false;
-            madnessBtn.textContent = '\u{1F525} Chaos to Madness';
+            madnessRequestsInput.disabled = false;
+            madnessBtn.textContent = '\u{1F525} Send the load';
             if (madnessPollTimer) { clearInterval(madnessPollTimer); madnessPollTimer = null; }
             madnessStatusEl.classList.remove('show');
           }
@@ -547,15 +635,20 @@ data:
 
         async function pollMadness() {
           try {
-            const res = await fetch('/api/madness?_=' + Date.now(), { cache: 'no-store' });
+            const res = await trackedFetch('/api/madness?_=' + Date.now(), { cache: 'no-store' });
             renderMadness(await res.json());
           } catch (e) { /* next poll will retry */ }
         }
 
         madnessBtn.addEventListener('click', async () => {
           madnessBtn.disabled = true;
+          const requests = Math.min(5000, Math.max(10, parseInt(madnessRequestsInput.value, 10) || 500));
           try {
-            const res = await fetch('/api/madness', { method: 'POST', cache: 'no-store' });
+            const res = await trackedFetch('/api/madness', {
+              method: 'POST', cache: 'no-store',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ requests }),
+            });
             const data = await res.json();
             renderMadness(data);
             if (!data.started) {
@@ -566,12 +659,45 @@ data:
           } catch (e) { madnessBtn.disabled = false; }
         });
 
+        // "Pause chaos": shared, same polling-not-client-state pattern as
+        // madness above, just simpler -- one deployment, replicas 0 or 1,
+        // no multi-step sequence to track.
+        const chaosBtn = document.getElementById('chaos-toggle-btn');
+
+        function renderChaos(state) {
+          if (state.paused == null) {
+            chaosBtn.textContent = 'unavailable';
+            chaosBtn.disabled = true;
+            return;
+          }
+          chaosBtn.disabled = false;
+          chaosBtn.textContent = state.paused ? 'Resume Chaos' : 'Pause Chaos';
+          chaosBtn.classList.toggle('paused', state.paused);
+        }
+
+        async function pollChaos() {
+          try {
+            const res = await trackedFetch('/api/chaos?_=' + Date.now(), { cache: 'no-store' });
+            renderChaos(await res.json());
+          } catch (e) { /* next poll will retry */ }
+        }
+
+        chaosBtn.addEventListener('click', async () => {
+          chaosBtn.disabled = true;
+          try {
+            const res = await trackedFetch('/api/chaos', { method: 'POST', cache: 'no-store' });
+            renderChaos(await res.json());
+          } catch (e) { chaosBtn.disabled = false; }
+        });
+
         recordVisit();
         renderTopology();
         pollMadness(); // pick up an already-in-progress run from another visitor
+        pollChaos();
         setInterval(poll, 1500);
         setInterval(renderTopology, 4000);
         setInterval(refreshVisits, 5000);
+        setInterval(pollChaos, 5000); // stay in sync if someone else toggles it
       </script>
     </body>
     </html>
@@ -608,11 +734,9 @@ data:
   api.py: |
     import json
     import ssl
-    import threading
     import time
     import urllib.request
     import redis
-    from concurrent.futures import ThreadPoolExecutor
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -648,12 +772,12 @@ data:
         with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
             return json.load(resp)
 
-    def scale_website(replicas):
+    def k8s_scale(deployment, replicas):
         with open(K8S_TOKEN_PATH) as f:
             token = f.read().strip()
         ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
         req = urllib.request.Request(
-            f"https://kubernetes.default.svc/apis/apps/v1/namespaces/{NAMESPACE}/deployments/website/scale",
+            f"https://kubernetes.default.svc/apis/apps/v1/namespaces/{NAMESPACE}/deployments/{deployment}/scale",
             method="PATCH",
             data=json.dumps({"spec": {"replicas": replicas}}).encode(),
             headers={
@@ -664,47 +788,197 @@ data:
         with urllib.request.urlopen(req, context=ctx, timeout=5):
             pass
 
-    MADNESS_TOTAL = 10000
-    MADNESS_REPLICAS = 100
-    MADNESS_HOLD_SECS = 60
-    _madness_lock = threading.Lock()
-    _madness_state = {"running": False, "sent": 0, "total": 0, "phase": ""}
+    def k8s_get_scale(deployment):
+        data = k8s_api_get(f"/apis/apps/v1/namespaces/{NAMESPACE}/deployments/{deployment}/scale")
+        return data.get("spec", {}).get("replicas", 0)
 
-    def _fire_one():
+    # --- chaos pause/resume ---------------------------------------------
+    # website-chaos is itself a Deployment (replicas 0 or 1) -- pausing it
+    # is just scaling it to 0. No lock/Job needed: it's one quick,
+    # idempotent API call either way, not a multi-step sequence that can
+    # be interrupted mid-flight the way madness was.
+
+    def get_chaos_state():
         try:
-            with urllib.request.urlopen("http://website.apps.svc.cluster.local/", timeout=3):
-                pass
-        except Exception:
-            pass  # a handful of failed requests under 100x load is expected, not fatal
-
-    def _run_madness():
-        try:
-            _madness_state.update(running=True, sent=0, total=MADNESS_TOTAL, phase="scaling up")
-            scale_website(MADNESS_REPLICAS)
-
-            _madness_state["phase"] = "firing requests"
-            with ThreadPoolExecutor(max_workers=80) as pool:
-                # as_completed via map -- just need the count, not results.
-                for _ in pool.map(lambda _: _fire_one(), range(MADNESS_TOTAL)):
-                    _madness_state["sent"] += 1
-
-            _madness_state["phase"] = f"holding at {MADNESS_REPLICAS} for {MADNESS_HOLD_SECS}s"
-            time.sleep(MADNESS_HOLD_SECS)
-
-            _madness_state["phase"] = "scaling back down"
-            scale_website(3)
+            return {"paused": k8s_get_scale("website-chaos") == 0}
         except Exception as e:
-            _madness_state["phase"] = f"error: {e}"
-        finally:
-            _madness_state["running"] = False
+            return {"paused": None, "error": str(e)}
 
-    def start_madness():
-        with _madness_lock:
-            if _madness_state["running"]:
+    def toggle_chaos():
+        current = k8s_get_scale("website-chaos")
+        target = 1 if current == 0 else 0
+        k8s_scale("website-chaos", target)
+        return {"paused": target == 0}
+
+    # --- chaos to madness --------------------------------------------
+    # Runs as a one-off Job (dispatched here, executed independently),
+    # not a thread inside this pod -- this pod is itself app=website and
+    # website-chaos could kill it mid-sequence, which is exactly what
+    # happened when this used to be an in-process background thread:
+    # the scale-back-to-N step died with the pod that was running it,
+    # leaving the Deployment stuck scaled up with nothing left to fix
+    # it. A Job survives independently of any website pod's lifecycle,
+    # and isn't labeled app=website so chaos can never target it either.
+    # State lives in Redis (website:madness), not this process's memory,
+    # so every api pod's GET /madness reports the same thing regardless
+    # of which one happens to answer.
+    # Requests drive replica count, not the other way around -- you choose
+    # how much load to send, and the platform scales website to whatever
+    # that takes, the way a real autoscaler reacts to demand instead of
+    # you picking a pod count out of the air. The ratio/bounds are a
+    # simplified stand-in for a real HPA's metric+target-utilization math.
+    MADNESS_REQUESTS_PER_POD = 10
+    MADNESS_MIN_REPLICAS = 3
+    MADNESS_MAX_REPLICAS = 100  # resource-checked safe earlier this session: 20 allocatable cores, ~15-25% used
+    MADNESS_MIN_REQUESTS = 10
+    MADNESS_MAX_REQUESTS = 5000
+    MADNESS_HOLD_SECS = 60
+    MADNESS_KEY = "website:madness"
+    MADNESS_LOCK_KEY = "website:madness:lock"
+
+    def replicas_for(requests):
+        return min(MADNESS_MAX_REPLICAS, max(MADNESS_MIN_REPLICAS, round(requests / MADNESS_REQUESTS_PER_POD)))
+
+    def get_madness_state():
+        try:
+            h = r.hgetall(MADNESS_KEY)
+            return {
+                "running": h.get("running") == "1",
+                "sent": int(h.get("sent", 0)),
+                "total": int(h.get("total", 0)),
+                "replicas": int(h.get("replicas", 0)),
+                "phase": h.get("phase", ""),
+            }
+        except Exception as e:
+            return {"running": False, "sent": 0, "total": 0, "replicas": 0, "phase": f"error: {e}"}
+
+    def create_madness_job(total, replicas):
+        job_name = f"website-madness-{int(time.time())}"
+        # sh, not python -- alpine + curl + jq + redis-cli, same style as
+        # load-cron.yaml's script. `trap cleanup EXIT` is the important
+        # part: it runs the scale-back-down and lock release on *any*
+        # exit path (success, a curl failure under `set -e`, or SIGTERM
+        # from activeDeadlineSeconds) -- so a mid-script failure can't
+        # leave website stuck scaled up the way the old in-process
+        # version could.
+        script = f'''set -e
+        apk add --no-cache curl jq redis >/tmp/apk.log 2>&1
+
+        TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+        CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        API=https://kubernetes.default.svc
+        NS={NAMESPACE}
+        REDIS=website-redis.apps.svc.cluster.local
+
+        scale() {{
+          curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \\
+            -H "Content-Type: application/merge-patch+json" \\
+            -X PATCH "$API/apis/apps/v1/namespaces/$NS/deployments/website/scale" \\
+            -d "{{\\"spec\\":{{\\"replicas\\":$1}}}}" >/dev/null
+        }}
+
+        cleanup_done=0
+        cleanup() {{
+          if [ "$cleanup_done" = "0" ]; then
+            cleanup_done=1
+            scale 3 || true
+            redis-cli -h "$REDIS" HSET {MADNESS_KEY} running 0 phase "idle" >/dev/null 2>&1 || true
+            redis-cli -h "$REDIS" DEL {MADNESS_LOCK_KEY} >/dev/null 2>&1 || true
+          fi
+        }}
+        trap cleanup EXIT
+
+        redis-cli -h "$REDIS" HSET {MADNESS_KEY} running 1 sent 0 total {total} replicas {replicas} phase "scaling up to {replicas} pods" >/dev/null
+        scale {replicas}
+
+        redis-cli -h "$REDIS" HSET {MADNESS_KEY} phase "firing requests" >/dev/null
+        SENT=0
+        for i in $(seq 1 {total}); do
+          curl -sS -o /dev/null --max-time 3 http://website.apps.svc.cluster.local/ || true
+          SENT=$((SENT + 1))
+          if [ $((SENT % 20)) -eq 0 ]; then
+            redis-cli -h "$REDIS" HSET {MADNESS_KEY} sent "$SENT" >/dev/null
+          fi
+        done
+        redis-cli -h "$REDIS" HSET {MADNESS_KEY} sent "$SENT" >/dev/null
+
+        redis-cli -h "$REDIS" HSET {MADNESS_KEY} phase "holding at {replicas} pods for {MADNESS_HOLD_SECS}s" >/dev/null
+        sleep {MADNESS_HOLD_SECS}
+
+        redis-cli -h "$REDIS" HSET {MADNESS_KEY} phase "scaling back down" >/dev/null
+        '''
+        manifest = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job_name,
+                "namespace": NAMESPACE,
+                "labels": {"app.kubernetes.io/part-of": "website-demo"},
+            },
+            "spec": {
+                "backoffLimit": 0,
+                "activeDeadlineSeconds": 240,
+                "ttlSecondsAfterFinished": 300,
+                "template": {
+                    "metadata": {"labels": {"app": "website-madness"}},
+                    "spec": {
+                        "serviceAccountName": "website-load",
+                        "restartPolicy": "Never",
+                        "containers": [{
+                            "name": "madness",
+                            "image": "alpine:3.20",
+                            "command": ["sh", "-c", script],
+                            "resources": {
+                                "requests": {"cpu": "20m", "memory": "32Mi"},
+                                "limits": {"memory": "64Mi"},
+                            },
+                        }],
+                    },
+                },
+            },
+        }
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(
+            f"https://kubernetes.default.svc/apis/batch/v1/namespaces/{NAMESPACE}/jobs",
+            method="POST",
+            data=json.dumps(manifest).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=5):
+            pass
+
+    def start_madness(requested):
+        # Never trust a client-computed replica count -- only the request
+        # count comes from the caller, clamped, and the platform (this
+        # function) is what decides how many pods that takes.
+        try:
+            requested = int(requested)
+        except (TypeError, ValueError):
+            requested = MADNESS_MIN_REQUESTS
+        requested = min(MADNESS_MAX_REQUESTS, max(MADNESS_MIN_REQUESTS, requested))
+        replicas = replicas_for(requested)
+
+        try:
+            # NX -- only one caller wins the race to actually start a run;
+            # EX 300 is a safety net so a lock never gets stuck forever if
+            # the Job creation itself fails after claiming it.
+            if not r.set(MADNESS_LOCK_KEY, "1", nx=True, ex=300):
                 return False
-            _madness_state["running"] = True  # claim it before the thread starts, avoid a race
-        threading.Thread(target=_run_madness, daemon=True).start()
-        return True
+        except Exception:
+            return False
+        try:
+            r.hset(MADNESS_KEY, mapping={
+                "running": "1", "sent": "0", "total": str(requested),
+                "replicas": str(replicas), "phase": "starting",
+            })
+            create_madness_job(requested, replicas)
+            return True
+        except Exception as e:
+            r.hset(MADNESS_KEY, mapping={"running": "0", "phase": f"error: {e}"})
+            r.delete(MADNESS_LOCK_KEY)
+            return False
 
     def container_status(pod, name, kind):
         key = "initContainerStatuses" if kind == "init" else "containerStatuses"
@@ -802,7 +1076,9 @@ data:
             elif self.path.startswith("/stats"):
                 self._json(200, {"visits": get_visits()})
             elif self.path.startswith("/madness"):
-                self._json(200, dict(_madness_state))
+                self._json(200, get_madness_state())
+            elif self.path.startswith("/chaos"):
+                self._json(200, get_chaos_state())
             else:
                 self._json(404, {"error": "not found"})
 
@@ -810,8 +1086,15 @@ data:
             if self.path.startswith("/visit"):
                 self._json(200, {"visits": record_visit()})
             elif self.path.startswith("/madness"):
-                started = start_madness()
-                self._json(200 if started else 409, dict(_madness_state, started=started))
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                except Exception:
+                    body = {}
+                started = start_madness(body.get("requests", MADNESS_MIN_REQUESTS))
+                self._json(200 if started else 409, dict(get_madness_state(), started=started))
+            elif self.path.startswith("/chaos"):
+                self._json(200, toggle_chaos())
             else:
                 self._json(404, {"error": "not found"})
 
