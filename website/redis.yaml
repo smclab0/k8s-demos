@@ -1,0 +1,70 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: website-redis-data
+  namespace: apps
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website-redis
+  namespace: apps
+  labels:
+    app: website-redis
+spec:
+  replicas: 1
+  strategy:
+    # A rolling update would briefly run two pods against the same RWO PVC,
+    # which most storage classes (including this cluster's longhorn) can't
+    # attach to two pods at once -- recreate instead, a few seconds of
+    # downtime for the counter beats a stuck rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: website-redis
+  template:
+    metadata:
+      labels:
+        app: website-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # AOF persistence so the visit counter survives a pod restart or
+          # reschedule, not just a page reload -- the whole point of asking
+          # for a *persistent* counter instead of the in-memory one this
+          # replaced.
+          command: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: website-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: website-redis
+  namespace: apps
+spec:
+  type: ClusterIP
+  selector:
+    app: website-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
