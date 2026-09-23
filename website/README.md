@@ -2,6 +2,8 @@
 
 A minimal static site for testing this k8s cluster -- deployments, rollouts, scaling, Service load-balancing, self-healing -- unrelated to the `trading/` demo.
 
+Inspired by [stevemc-suse/rancher-k3s-fleet-examples](https://github.com/stevemc-suse/rancher-k3s-fleet-examples/tree/master/fleet-examples).
+
 `website` is a Deployment with 3 replicas. Each pod runs three containers:
 - `render` (`alpine`, init) -- substitutes the pod name, node name, and pod IP into the page template via the downward API, once at startup.
 - `nginx` (`nginx:1.27-alpine`) -- serves the rendered page and reverse-proxies `/api/` to the sidecar below. Sends `Cache-Control: no-store` on everything, so the page's own polling always reaches a live pod instead of a cache.
