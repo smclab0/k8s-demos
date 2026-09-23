@@ -67,6 +67,14 @@ data:
         .topo-figure { margin: 1.1rem 0 0; }
         .topo-svg { width: 100%; height: auto; display: block; }
         .topo-figure figcaption { margin-top: 0.6rem; font-size: 0.78rem; color: #64748b; }
+        /* Brief highlight when a real request actually goes to Redis --
+           distinct blue, so it never reads as the green "current pod" or
+           the amber Redis identity color. */
+        .topo-svg .db-arrow, .topo-svg #db-box { transition: stroke 0.15s ease, stroke-width 0.15s ease, fill-opacity 0.15s ease; }
+        .topo-svg .db-arrow.pulse { stroke: #38bdf8 !important; stroke-width: 3 !important; stroke-opacity: 1 !important; }
+        .topo-svg #db-box.pulse { stroke: #38bdf8; fill: #38bdf8; fill-opacity: 0.28; }
+        .topo-svg #db-activity { opacity: 0; transition: opacity 0.15s ease; }
+        .topo-svg #db-activity.show { opacity: 1; }
         .topology-empty { font-size: 0.85rem; color: #64748b; }
       </style>
     </head>
@@ -207,6 +215,7 @@ data:
             const live = !!opts.live;
             parts.push(
               '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+                (opts.cls ? 'class="' + opts.cls + '" ' : '') +
                 'stroke="' + (live ? '#4ade80' : '#475569') + '" stroke-width="' + (live ? 2.5 : 1.4) + '" ' +
                 (live ? '' : 'stroke-opacity="0.6" ') +
                 'marker-end="url(#' + (live ? 'arrow-live' : 'arrow') + ')"/>'
@@ -311,8 +320,9 @@ data:
             // Every app pod's api container is what actually talks to Redis
             // (see the container list above) -- draw the fan-in from the
             // nodes that have one, not from the Service, since the Service
-            // never routes here.
-            occupiedCenters.forEach((x) => arrow(x, nodeRowY + nodeBoxH, cx, dbRowY, {}));
+            // never routes here. Tagged "db-arrow" so pulseDb() below can
+            // flash them the instant a real request goes out.
+            occupiedCenters.forEach((x) => arrow(x, nodeRowY + nodeBoxH, cx, dbRowY, { cls: 'db-arrow' }));
             parts.push(
               '<text x="' + cx + '" y="' + (dbRowY - 8) + '" text-anchor="middle" font-size="8.5" ' +
                 'fill="#64748b">every pod’s api container reads &amp; writes here</text>'
@@ -320,11 +330,13 @@ data:
 
             const dbReady = (db.containers || []).some((c) => c.name === 'redis' && c.ready);
             parts.push(
-              '<rect x="' + dbX + '" y="' + dbRowY + '" width="' + dbBoxW + '" height="' + dbBoxH + '" rx="7" ' +
+              '<rect id="db-box" x="' + dbX + '" y="' + dbRowY + '" width="' + dbBoxW + '" height="' + dbBoxH + '" rx="7" ' +
                 'fill="#c98500" fill-opacity="0.1" stroke="#c98500" stroke-width="1.5"/>' +
               '<circle cx="' + (dbX + 16) + '" cy="' + (dbRowY + 16) + '" r="3" fill="' + (dbReady ? '#4ade80' : '#475569') + '"/>' +
               '<text x="' + (dbX + 24) + '" y="' + (dbRowY + 19) + '" font-size="10.5" fill="#e2e8f0">Redis (website-redis)</text>' +
-              '<text x="' + (dbX + 24) + '" y="' + (dbRowY + 34) + '" font-size="8.5" fill="#94a3b8">on ' + esc(shortHost(db.node || '?')) + '</text>'
+              '<text x="' + (dbX + 24) + '" y="' + (dbRowY + 34) + '" font-size="8.5" fill="#94a3b8">on ' + esc(shortHost(db.node || '?')) + '</text>' +
+              '<text id="db-activity" x="' + (dbX + dbBoxW - 10) + '" y="' + (dbRowY - 20) + '" ' +
+                'text-anchor="end" font-size="8.5" font-weight="600" fill="#38bdf8"></text>'
             );
             if (db.pvc) {
               const pvcLabel = db.pvc.name + ' — ' + db.pvc.capacity + ' (' + db.pvc.storageClass + ')';
@@ -360,6 +372,30 @@ data:
           }
         }
 
+        // Flashes the Redis box and its fan-in arrows in the topology
+        // diagram the instant a request to it actually goes out, and shows
+        // which kind. A no-op if the topology diagram hasn't rendered yet
+        // (getElementById returns null before the first renderTopology()).
+        let dbPulseTimer = null;
+        function pulseDb(kind) {
+          const box = document.getElementById('db-box');
+          if (!box) return;
+          const tag = document.getElementById('db-activity');
+          const arrows = document.querySelectorAll('.db-arrow');
+          box.classList.add('pulse');
+          arrows.forEach((a) => a.classList.add('pulse'));
+          if (tag) {
+            tag.textContent = kind === 'write' ? 'WRITE ↓' : 'READ ↑';
+            tag.classList.add('show');
+          }
+          clearTimeout(dbPulseTimer);
+          dbPulseTimer = setTimeout(() => {
+            box.classList.remove('pulse');
+            arrows.forEach((a) => a.classList.remove('pulse'));
+            if (tag) tag.classList.remove('show');
+          }, 450);
+        }
+
         // Recorded once per real page load, not per poll -- the poll loop
         // re-fetches '/' every 1.5s to watch pods cycle, and counting that
         // as a "visit" would make the number meaningless.
@@ -367,6 +403,7 @@ data:
           try {
             const res = await fetch('/api/visit', { method: 'POST', cache: 'no-store' });
             const data = await res.json();
+            pulseDb('write');
             if (data.visits != null) document.getElementById('visits').textContent = data.visits;
           } catch (e) { /* Redis or the sidecar may be briefly unavailable */ }
         }
@@ -374,6 +411,7 @@ data:
           try {
             const res = await fetch('/api/stats?_=' + Date.now(), { cache: 'no-store' });
             const data = await res.json();
+            pulseDb('read');
             if (data.visits != null) document.getElementById('visits').textContent = data.visits;
           } catch (e) { /* next refresh will retry */ }
         }
