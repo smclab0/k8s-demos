@@ -1,0 +1,648 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eib-flow-html
+  namespace: apps
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>EIB Demo Flow</title>
+      <style>
+        :root { color-scheme: light dark; }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          padding: 2.5rem 1rem;
+          display: flex;
+          justify-content: center;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: #0f172a;
+          color: #e2e8f0;
+        }
+        .page { width: 100%; max-width: 44rem; display: flex; flex-direction: column; gap: 1.25rem; }
+        .panel {
+          padding: 1.5rem 1.75rem;
+          border-radius: 0.75rem;
+          background: #1e293b;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        h1 { margin: 0 0 0.5rem; font-size: 1.4rem; display: flex; align-items: center; gap: 0.6rem; }
+        h2 { margin: 0 0 0.25rem; font-size: 1rem; }
+        p.lead { color: #94a3b8; margin: 0; }
+        p.hint { margin: 0.35rem 0 0; font-size: 0.8rem; color: #64748b; }
+        .live-dot {
+          width: 0.6rem; height: 0.6rem; border-radius: 50%;
+          background: #4ade80; flex: none;
+          animation: pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
+          50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+        }
+
+        .topo-figure { margin: 1rem 0 0; }
+        .topo-svg { width: 100%; height: auto; display: block; }
+        .topo-figure figcaption { margin-top: 0.6rem; font-size: 0.78rem; color: #64748b; }
+
+        .run-row { display: flex; align-items: center; gap: 0.9rem; margin-top: 1.1rem; flex-wrap: wrap; }
+        .run-btn {
+          padding: 0.65rem 1.25rem;
+          border: none;
+          border-radius: 0.5rem;
+          background: linear-gradient(135deg, #38bdf8, #22d3ee);
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 0.85rem;
+          cursor: pointer;
+          transition: transform 0.15s ease, opacity 0.15s ease;
+        }
+        .run-btn:hover:not(:disabled) { transform: scale(1.03); }
+        .run-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .run-status { font-size: 0.82rem; color: #94a3b8; }
+
+        .bar-track { height: 10px; background: #0f172a; border-radius: 999px; overflow: hidden; margin-top: 0.9rem; }
+        .bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #38bdf8, #22d3ee); transition: width 0.4s ease; }
+
+        .stage-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 1.1rem; }
+        .stage-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+        .stage-icon {
+          width: 1.1rem; height: 1.1rem; border-radius: 50%; flex: none;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.68rem; font-weight: 700;
+          border: 1.5px solid #475569; color: #475569;
+        }
+        .stage-row.done .stage-icon { border-color: #4ade80; background: #4ade80; color: #0f172a; }
+        .stage-row.done .stage-label { color: #cbd5e1; }
+        .stage-row.active .stage-icon { border-color: #38bdf8; color: #38bdf8; animation: pulse-blue 1s ease-in-out infinite; }
+        .stage-row.active .stage-label { color: #e2e8f0; font-weight: 600; }
+        .stage-row.pending .stage-label { color: #64748b; }
+        @keyframes pulse-blue {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.5); }
+          50% { box-shadow: 0 0 0 5px rgba(56, 189, 248, 0); }
+        }
+
+        .log-panel {
+          margin-top: 0.9rem;
+          background: #0f172a;
+          border-radius: 0.5rem;
+          padding: 0.75rem 0.9rem;
+          max-height: 10rem;
+          overflow-y: auto;
+          font-family: ui-monospace, monospace;
+          font-size: 0.75rem;
+          color: #64748b;
+          line-height: 1.5;
+        }
+        .log-panel .current { color: #94a3b8; }
+        .log-empty { color: #475569; font-style: italic; }
+
+        table.history { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.8rem; }
+        table.history th, table.history td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        table.history th { color: #64748b; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+        table.history td { color: #cbd5e1; font-family: ui-monospace, monospace; }
+        .status-badge { padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.7rem; font-weight: 700; }
+        .status-badge.success { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+        .status-badge.interrupted { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+      </style>
+    </head>
+    <body>
+      <div class="page">
+        <div class="panel">
+          <h1><span class="live-dot"></span>EIB Demo Flow</h1>
+          <p class="lead">A demo of SUSE Edge Image Builder's build pipeline -- a definition file and a base image go in, a customized bootable image comes out.</p>
+          <p class="hint">This runs a simulated build (timed like a real one) as a Kubernetes Job, shared with everyone viewing this page right now.</p>
+        </div>
+
+        <div class="panel">
+          <h2>Pipeline</h2>
+          <div id="pipeline">Loading&hellip;</div>
+          <div class="run-row">
+            <button id="run-btn" class="run-btn">&#9654; Run build</button>
+            <span id="run-status" class="run-status"></span>
+          </div>
+          <div class="bar-track"><div id="bar-fill" class="bar-fill"></div></div>
+          <div class="stage-list" id="stage-list"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Build log</h2>
+          <div class="log-panel" id="log-panel"><span class="log-empty">No build yet -- click "Run build" above.</span></div>
+        </div>
+
+        <div class="panel">
+          <h2>Recent builds</h2>
+          <div id="history"><p class="hint">No builds yet.</p></div>
+        </div>
+      </div>
+
+      <script>
+        const STAGES = [
+          ['definition', 'Validate definition file'],
+          ['base-image', 'Fetch base image'],
+          ['combustion', 'Inject OS customization'],
+          ['packages', 'Resolve & cache RPM packages'],
+          ['kubernetes', 'Embed Kubernetes (RKE2) + air-gap images'],
+          ['assemble', 'Assemble output image'],
+          ['done', 'Output image ready'],
+        ];
+        const STAGE_IDS = STAGES.map((s) => s[0]);
+
+        function esc(s) {
+          return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // Depicts the mechanism, not a decoration: three boxes on a fixed
+        // vertical line (definition file + base image feed into the build,
+        // the build produces the output image), the middle one glowing
+        // while a build is running and the last one turning green once
+        // stage === 'done'. No node/pod topology here -- EIB is a
+        // build-time pipeline, not a running service.
+        function buildPipelineSVG(state) {
+          const width = 360, cx = width / 2;
+          const boxH = 34, gapV = 46;
+          const topY = 14, buildY = topY + boxH + gapV, outY = buildY + 70 + gapV;
+          const height = outY + boxH + 16;
+
+          const running = !!state.running;
+          const done = state.stage === 'done';
+          const buildColor = running ? '#38bdf8' : '#475569';
+          const outColor = done ? '#4ade80' : '#475569';
+
+          function box(x, y, w, h, label, opts) {
+            opts = opts || {};
+            return (
+              '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="7" ' +
+                'fill="' + (opts.fill || '#0f172a') + '" fill-opacity="' + (opts.fillOpacity != null ? opts.fillOpacity : 1) + '" ' +
+                'stroke="' + (opts.stroke || '#475569') + '" stroke-width="' + (opts.strokeWidth || 1.5) + '"/>' +
+              '<text x="' + (x + w / 2) + '" y="' + (y + h / 2 + (opts.fontSize || 10.5) / 3) + '" text-anchor="middle" ' +
+                'font-size="' + (opts.fontSize || 10.5) + '" fill="' + (opts.textFill || '#e2e8f0') + '">' + esc(label) + '</text>'
+            );
+          }
+          function arrow(x1, y1, x2, y2, color) {
+            return (
+              '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' +
+                'stroke="' + color + '" stroke-width="1.6" marker-end="url(#eib-arrow)"/>'
+            );
+          }
+
+          const parts = [];
+          parts.push(
+            '<defs><marker id="eib-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+              '<path d="M0,0 L10,5 L0,10 z" fill="#475569"/>' +
+            '</marker></defs>'
+          );
+
+          parts.push(box(cx - 145, topY, 130, boxH, 'Definition file', { fontSize: 9.5 }));
+          parts.push(box(cx + 15, topY, 130, boxH, 'Base image', { fontSize: 9.5 }));
+          parts.push(arrow(cx - 80, topY + boxH, cx - 15, buildY, '#475569'));
+          parts.push(arrow(cx + 80, topY + boxH, cx + 15, buildY, '#475569'));
+
+          parts.push(box(cx - 100, buildY, 200, 70, '', { stroke: buildColor, strokeWidth: running ? 2.2 : 1.5, fill: buildColor, fillOpacity: running ? 0.1 : 0 }));
+          parts.push(
+            '<text x="' + cx + '" y="' + (buildY + 18) + '" text-anchor="middle" font-size="11" font-weight="700" fill="' + (running ? '#38bdf8' : '#e2e8f0') + '">EIB Build</text>' +
+            '<text x="' + cx + '" y="' + (buildY + 34) + '" text-anchor="middle" font-size="8.5" fill="#94a3b8">' + esc(running ? (state.phase || 'running') : 'idle') + '</text>' +
+            '<text x="' + cx + '" y="' + (buildY + 50) + '" text-anchor="middle" font-size="8" fill="#64748b">suse/edge-image-builder</text>'
+          );
+
+          parts.push(arrow(cx, buildY + 70, cx, outY, done ? '#4ade80' : '#475569'));
+          parts.push(box(cx - 90, outY, 180, boxH, done ? 'Output image ready' : 'Output image', {
+            fontSize: 9.5, stroke: outColor, strokeWidth: done ? 2.2 : 1.5,
+            fill: outColor, fillOpacity: done ? 0.12 : 0, textFill: done ? '#4ade80' : '#e2e8f0',
+          }));
+
+          return (
+            '<figure class="topo-figure">' +
+              '<svg viewBox="0 0 ' + width + ' ' + height + '" class="topo-svg" role="img" ' +
+                'aria-label="Definition file and base image feed into the EIB build, which produces the output image.">' +
+                parts.join('') +
+              '</svg>' +
+              '<figcaption>Definition file + base image → EIB build → output image.</figcaption>' +
+            '</figure>'
+          );
+        }
+
+        function renderStages(state) {
+          const el = document.getElementById('stage-list');
+          const idx = state.stage ? STAGE_IDS.indexOf(state.stage) : -1;
+          el.innerHTML = STAGES.map(([id, label], i) => {
+            let cls = 'pending', icon = '';
+            if (idx >= 0 && i < idx) { cls = 'done'; icon = '&#10003;'; }
+            else if (i === idx) { cls = state.stage === 'done' ? 'done' : 'active'; icon = state.stage === 'done' ? '&#10003;' : ''; }
+            return (
+              '<div class="stage-row ' + cls + '">' +
+                '<span class="stage-icon">' + icon + '</span>' +
+                '<span class="stage-label">' + esc(label) + '</span>' +
+              '</div>'
+            );
+          }).join('');
+        }
+
+        function renderLog(lines) {
+          const el = document.getElementById('log-panel');
+          if (!lines || lines.length === 0) {
+            el.innerHTML = '<span class="log-empty">No build yet -- click "Run build" above.</span>';
+            return;
+          }
+          el.innerHTML = lines.map((l, i) =>
+            '<div' + (i === lines.length - 1 ? ' class="current"' : '') + '>' + esc(l) + '</div>'
+          ).join('');
+          el.scrollTop = el.scrollHeight;
+        }
+
+        function renderHistory(history) {
+          const el = document.getElementById('history');
+          if (!history || history.length === 0) {
+            el.innerHTML = '<p class="hint">No builds yet.</p>';
+            return;
+          }
+          const rows = history.map((h) => {
+            const when = new Date(h.finished_at * 1000).toLocaleTimeString();
+            const statusClass = h.status === 'success' ? 'success' : 'interrupted';
+            return (
+              '<tr><td>' + esc(when) + '</td><td>' + h.duration + 's</td>' +
+              '<td><span class="status-badge ' + statusClass + '">' + esc(h.status) + '</span></td></tr>'
+            );
+          }).join('');
+          el.innerHTML = '<table class="history"><thead><tr><th>Finished</th><th>Duration</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+
+        const runBtn = document.getElementById('run-btn');
+        const runStatus = document.getElementById('run-status');
+        const barFill = document.getElementById('bar-fill');
+        let fastPollTimer = null;
+
+        function render(state) {
+          document.getElementById('pipeline').innerHTML = buildPipelineSVG(state);
+          renderStages(state);
+          renderLog(state.log);
+          barFill.style.width = (state.progress || 0) + '%';
+          if (state.running) {
+            runBtn.disabled = true;
+            runBtn.textContent = 'Build in progress…';
+            runStatus.textContent = state.phase || 'starting';
+            if (!fastPollTimer) fastPollTimer = setInterval(pollBuild, 800);
+          } else {
+            runBtn.disabled = false;
+            runBtn.textContent = '▶ Run build';
+            runStatus.textContent = state.stage === 'done' ? 'Last build complete.' : '';
+            if (fastPollTimer) { clearInterval(fastPollTimer); fastPollTimer = null; }
+          }
+        }
+
+        async function pollBuild() {
+          try {
+            const res = await fetch('/api/build?_=' + Date.now(), { cache: 'no-store' });
+            render(await res.json());
+          } catch (e) { /* next poll will retry */ }
+        }
+
+        async function pollHistory() {
+          try {
+            const res = await fetch('/api/history?_=' + Date.now(), { cache: 'no-store' });
+            renderHistory(await res.json());
+          } catch (e) { /* next poll will retry */ }
+        }
+
+        runBtn.addEventListener('click', async () => {
+          runBtn.disabled = true;
+          try {
+            const res = await fetch('/api/build', { method: 'POST', cache: 'no-store' });
+            const data = await res.json();
+            render(data);
+            if (!data.started) {
+              runStatus.textContent = 'Already running (someone beat you to it) — showing live progress.';
+            }
+          } catch (e) { runBtn.disabled = false; }
+        });
+
+        render({ running: false, stage: '', phase: '', progress: 0, log: [] });
+        pollBuild();
+        pollHistory();
+        setInterval(pollBuild, 4000); // catch a build started from another tab
+        setInterval(pollHistory, 6000);
+      </script>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eib-flow-nginx-conf
+  namespace: apps
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_name _;
+      root /usr/share/nginx/html;
+      index index.html;
+      add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+      location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+      }
+      location / {
+        try_files $uri $uri/ =404;
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eib-flow-api-script
+  namespace: apps
+data:
+  api.py: |
+    import json
+    import ssl
+    import time
+    import urllib.request
+    import redis
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    NAMESPACE = "apps"
+
+    r = redis.Redis(
+        host="eib-flow-redis.apps.svc.cluster.local", port=6379,
+        decode_responses=True, socket_timeout=2, socket_connect_timeout=2,
+    )
+
+    BUILD_KEY = "eib:build"
+    BUILD_LOCK_KEY = "eib:build:lock"
+    BUILD_LOG_KEY = "eib:build:log"
+    HISTORY_KEY = "eib:build:history"
+
+    # (id, human phase text, simulated seconds, progress-% after this stage)
+    # Timed to roughly resemble a real EIB run's relative stage weights, not
+    # its absolute duration -- a real build takes minutes, this takes ~25s
+    # so it's watchable end to end.
+    STAGES = [
+        ("definition", "Validating definition file", 2, 15),
+        ("base-image", "Fetching base image: SL-Micro.x86_64-6.1-Base-GM.raw", 3, 30),
+        ("combustion", "Injecting OS customization (users, systemd, network)", 4, 50),
+        ("packages", "Resolving and caching RPM packages", 4, 68),
+        ("kubernetes", "Embedding RKE2 v1.30.4+rke2r1 and air-gap images", 5, 85),
+        ("assemble", "Assembling output image eib-demo-output.raw", 4, 97),
+    ]
+
+    def get_build_state():
+        try:
+            h = r.hgetall(BUILD_KEY)
+            log = r.lrange(BUILD_LOG_KEY, -50, -1)
+            return {
+                "running": h.get("running") == "1",
+                "stage": h.get("stage", ""),
+                "phase": h.get("phase", ""),
+                "progress": int(h.get("progress", 0)),
+                "log": log,
+            }
+        except Exception as e:
+            return {"running": False, "stage": "", "phase": f"error: {e}", "progress": 0, "log": []}
+
+    def get_history():
+        try:
+            items = r.lrange(HISTORY_KEY, 0, 9)
+            return [json.loads(i) for i in items]
+        except Exception:
+            return []
+
+    def create_build_job():
+        job_name = f"eib-flow-build-{int(time.time())}"
+        stage_calls = "\n".join(
+            f'stage "{sid}" "{phase}" {secs} {pct}'
+            for sid, phase, secs, pct in STAGES
+        )
+        # sh, not python -- alpine + redis (for redis-cli), no k8s API
+        # calls needed at all since this only simulates stages and writes
+        # progress to Redis. `trap cleanup EXIT` mirrors website/'s
+        # madness Job: force running=0 and release the lock on *any* exit
+        # path (success, a set -e failure, or a SIGTERM from
+        # activeDeadlineSeconds), and log an "interrupted" history entry
+        # if it didn't reach the end -- so a mid-run failure can't leave
+        # the button stuck saying "in progress" forever.
+        script = f'''set -e
+        apk add --no-cache redis >/tmp/apk.log 2>&1
+        REDIS=eib-flow-redis.apps.svc.cluster.local
+
+        START=$(date +%s)
+        build_finished=0
+        cleanup_done=0
+        cleanup() {{
+          if [ "$cleanup_done" = "0" ]; then
+            cleanup_done=1
+            if [ "$build_finished" = "0" ]; then
+              END=$(date +%s)
+              DURATION=$((END - START))
+              redis-cli -h "$REDIS" HSET {BUILD_KEY} phase "interrupted" >/dev/null 2>&1 || true
+              redis-cli -h "$REDIS" LPUSH {HISTORY_KEY} "{{\\"finished_at\\":$END,\\"duration\\":$DURATION,\\"status\\":\\"interrupted\\"}}" >/dev/null 2>&1 || true
+              redis-cli -h "$REDIS" LTRIM {HISTORY_KEY} 0 9 >/dev/null 2>&1 || true
+            fi
+            redis-cli -h "$REDIS" HSET {BUILD_KEY} running 0 >/dev/null 2>&1 || true
+            redis-cli -h "$REDIS" DEL {BUILD_LOCK_KEY} >/dev/null 2>&1 || true
+          fi
+        }}
+        trap cleanup EXIT
+
+        log() {{
+          redis-cli -h "$REDIS" RPUSH {BUILD_LOG_KEY} "$1" >/dev/null
+          redis-cli -h "$REDIS" LTRIM {BUILD_LOG_KEY} -200 -1 >/dev/null
+        }}
+        stage() {{
+          redis-cli -h "$REDIS" HSET {BUILD_KEY} stage "$1" phase "$2" progress "$4" >/dev/null
+          log "[$1] $2"
+          sleep "$3"
+        }}
+
+        redis-cli -h "$REDIS" HSET {BUILD_KEY} running 1 stage "" phase "starting" progress 0 >/dev/null
+        redis-cli -h "$REDIS" DEL {BUILD_LOG_KEY} >/dev/null
+        log "=== eib-demo-flow build starting ==="
+
+        {stage_calls}
+
+        redis-cli -h "$REDIS" HSET {BUILD_KEY} stage "done" phase "Build complete" progress 100 >/dev/null
+        log "=== build complete: eib-demo-output.raw ==="
+
+        END=$(date +%s)
+        DURATION=$((END - START))
+        redis-cli -h "$REDIS" LPUSH {HISTORY_KEY} "{{\\"finished_at\\":$END,\\"duration\\":$DURATION,\\"status\\":\\"success\\"}}" >/dev/null
+        redis-cli -h "$REDIS" LTRIM {HISTORY_KEY} 0 9 >/dev/null
+        build_finished=1
+        '''
+        manifest = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job_name,
+                "namespace": NAMESPACE,
+                "labels": {"app.kubernetes.io/part-of": "eib-demo-flow"},
+            },
+            "spec": {
+                "backoffLimit": 0,
+                "activeDeadlineSeconds": 180,
+                "ttlSecondsAfterFinished": 300,
+                "template": {
+                    "metadata": {"labels": {"app": "eib-flow-build"}},
+                    "spec": {
+                        "serviceAccountName": "eib-flow-build",
+                        "restartPolicy": "Never",
+                        "containers": [{
+                            "name": "build",
+                            "image": "alpine:3.20",
+                            "command": ["sh", "-c", script],
+                            "resources": {
+                                "requests": {"cpu": "20m", "memory": "32Mi"},
+                                "limits": {"memory": "64Mi"},
+                            },
+                        }],
+                    },
+                },
+            },
+        }
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(
+            f"https://kubernetes.default.svc/apis/batch/v1/namespaces/{NAMESPACE}/jobs",
+            method="POST",
+            data=json.dumps(manifest).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=5):
+            pass
+
+    def start_build():
+        try:
+            # NX -- only one caller wins the race to start a run; EX 300
+            # is a safety net so the lock can't get stuck forever if Job
+            # creation itself fails after claiming it.
+            if not r.set(BUILD_LOCK_KEY, "1", nx=True, ex=300):
+                return False
+        except Exception:
+            return False
+        try:
+            r.hset(BUILD_KEY, mapping={"running": "1", "stage": "", "phase": "starting", "progress": "0"})
+            create_build_job()
+            return True
+        except Exception as e:
+            r.hset(BUILD_KEY, mapping={"running": "0", "phase": f"error: {e}"})
+            r.delete(BUILD_LOCK_KEY)
+            return False
+
+    class Handler(BaseHTTPRequestHandler):
+        def _json(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path.startswith("/build"):
+                self._json(200, get_build_state())
+            elif self.path.startswith("/history"):
+                self._json(200, get_history())
+            else:
+                self._json(404, {"error": "not found"})
+
+        def do_POST(self):
+            if self.path.startswith("/build"):
+                started = start_build()
+                self._json(200 if started else 409, dict(get_build_state(), started=started))
+            else:
+                self._json(404, {"error": "not found"})
+
+        def log_message(self, format, *args):
+            pass
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eib-flow
+  namespace: apps
+  labels:
+    app: eib-flow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: eib-flow
+  template:
+    metadata:
+      labels:
+        app: eib-flow
+    spec:
+      serviceAccountName: eib-flow
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          # Static content, same for every pod -- no downward-API
+          # rendering needed here the way website/'s initContainer does,
+          # since this page doesn't show its own pod/node identity.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 3
+            failureThreshold: 1
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+        - name: api
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/api.py"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 96Mi
+          volumeMounts:
+            - name: api-script
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: html
+          configMap:
+            name: eib-flow-html
+        - name: nginx-conf
+          configMap:
+            name: eib-flow-nginx-conf
+        - name: api-script
+          configMap:
+            name: eib-flow-api-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eib-flow
+  namespace: apps
+spec:
+  type: ClusterIP
+  selector:
+    app: eib-flow
+  ports:
+    - port: 80
+      targetPort: 80

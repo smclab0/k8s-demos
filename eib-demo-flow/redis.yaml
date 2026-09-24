@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: eib-flow-redis-data
+  namespace: apps
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eib-flow-redis
+  namespace: apps
+  labels:
+    app: eib-flow-redis
+spec:
+  replicas: 1
+  strategy:
+    # A rolling update would briefly run two pods against the same RWO
+    # PVC, which this cluster's longhorn storage class can't attach to
+    # two pods at once -- recreate instead.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: eib-flow-redis
+  template:
+    metadata:
+      labels:
+        app: eib-flow-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: eib-flow-redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eib-flow-redis
+  namespace: apps
+spec:
+  type: ClusterIP
+  selector:
+    app: eib-flow-redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eib-flow-redis
+  namespace: apps
+spec:
+  # Selecting eib-flow-redis at all flips it to default-deny Ingress --
+  # every other pod in the namespace (trading/'s and website's own
+  # unrelated redis instances included) loses access unless explicitly
+  # allowed.
+  podSelector:
+    matchLabels:
+      app: eib-flow-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: eib-flow
+        # The simulated build runs as its own Job, labeled distinctly
+        # (not app: eib-flow) so it never joins the Service's routing --
+        # same reasoning as website/'s website-madness label.
+        - podSelector:
+            matchLabels:
+              app: eib-flow-build
+      ports:
+        - protocol: TCP
+          port: 6379

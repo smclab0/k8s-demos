@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eib-flow
+  namespace: apps
+  annotations:
+    # Public ACME can't validate a hostname that resolves to a private
+    # RFC1918 address -- using the cluster's internal CA instead, same
+    # pattern every other app here uses.
+    cert-manager.io/cluster-issuer: lenny-internal-ca-issuer
+spec:
+  ingressClassName: traefik
+  rules:
+    # eib-flow.example.com is a placeholder -- deploy.sh replaces it with
+    # a live sslip.io hostname derived from the cluster's own traefik
+    # LoadBalancer IP at apply time. See README.md.
+    - host: eib-flow.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: eib-flow
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - eib-flow.example.com
+      secretName: eib-flow-tls
