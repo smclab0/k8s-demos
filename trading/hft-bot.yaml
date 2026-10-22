@@ -112,7 +112,10 @@ metadata:
   labels:
     app: hft-bot
 spec:
-  replicas: 2
+  # No replicas field on purpose: the market-open CronJob owns hft-bot's scale.
+  # Setting it here made every re-apply (e.g. deploy.sh) reset the swarm
+  # mid-phase. A fresh install starts at Kubernetes' default of 1 until the
+  # first cycle scales it.
   selector:
     matchLabels:
       app: hft-bot
