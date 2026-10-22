@@ -388,6 +388,14 @@ spec:
           command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/engine.py"]
           ports:
             - containerPort: 80
+          # The pip install above runs before the server binds :80, so without
+          # this the pod reads Ready (and `rollout status` returns) while it's
+          # still refusing connections -- which made deploy.sh's kickstart job
+          # fail its first attempt.
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            periodSeconds: 2
           resources:
             requests:
               cpu: 100m
