@@ -441,7 +441,7 @@ data:
           const marker = document.getElementById('timeline-marker');
           const segs = document.querySelectorAll('.timeline-seg');
           if (!opens.length) {
-            label.textContent = 'no session recorded yet — first cycle starts on the next 14-min tick';
+            label.textContent = 'no session recorded yet — waiting for the first cycle to start';
             marker.style.left = '0%';
             segs.forEach(s => s.classList.remove('active'));
             return;
@@ -574,7 +574,7 @@ data:
                 status.className = ageSec < 20 ? 'fresh' : '';
               }
             } else {
-              status.textContent = 'market status: no session recorded yet (cycles every 14 min)';
+              status.textContent = 'market status: waiting for the first cycle to start';
             }
 
             lastEvents = data.events || [];

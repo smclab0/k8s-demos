@@ -29,6 +29,31 @@ roleRef:
   name: market-open-scaler
   apiGroup: rbac.authorization.k8s.io
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: market-open-read-nodes
+rules:
+  # Nodes aren't namespaced, so reading the live node count (to scale
+  # open-phase hft-bot replicas as open_bots_per_node * node count) needs a
+  # ClusterRole -- same reasoning as trading-dashboard-read-nodes.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: market-open-read-nodes
+subjects:
+  - kind: ServiceAccount
+    name: market-open
+    namespace: apps
+roleRef:
+  kind: ClusterRole
+  name: market-open-read-nodes
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -73,6 +98,27 @@ spec:
                     echo
                   }
 
+                  # Sleeps through a phase in 15s steps, but exits cleanly if a newer
+                  # market_open shows up in /events -- i.e. another cycle has taken
+                  # over. That lets deploy.sh kick off an immediate first cycle
+                  # (outside the schedule, so concurrencyPolicy:Forbid can't see it)
+                  # which then simply yields to the next scheduled tick instead of
+                  # fighting it over hft-bot's scale.
+                  phase_sleep() {
+                    remaining=$1
+                    while [ "$remaining" -gt 0 ]; do
+                      step=$(( remaining < 15 ? remaining : 15 ))
+                      sleep "$step"
+                      remaining=$(( remaining - step ))
+                      if curl -sS -m 10 http://trading-engine.apps.svc.cluster.local/events 2>/dev/null \
+                          | jq -e --argjson t "$MY_OPEN" \
+                            '[.[] | select(.type == "market_open") | .epoch] | max // 0 | . > $t + 30' >/dev/null 2>&1; then
+                        echo "=== a newer cycle has started, handing over ==="
+                        exit 0
+                      fi
+                    done
+                  }
+
                   # Bot counts and phase durations come from /config (editable via
                   # the dashboard's /admin page) instead of being hardcoded, so tuning
                   # them doesn't need a redeploy. Snapshotted once per cycle; a
@@ -82,29 +128,37 @@ spec:
                   # sum to close to the schedule interval, cycles will run back-to-back
                   # with a gap or get skipped by concurrencyPolicy:Forbid, not corrupt.
                   CONFIG=$(curl -sS -m 60 http://trading-engine.apps.svc.cluster.local/config || echo '{}')
-                  OPEN_BOTS=$(echo "$CONFIG" | jq -r '.open_bots // 30')
+
+                  # Open-phase swarm size tracks the live cluster size (more nodes =
+                  # more bots) instead of a fixed replica count, so it scales itself
+                  # as the cluster grows or shrinks with no config edit needed.
+                  NODE_COUNT=$(curl -sS -m 60 --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
+                    "$API/api/v1/nodes" | jq '.items | length')
+                  OPEN_BOTS_PER_NODE=$(echo "$CONFIG" | jq -r '.open_bots_per_node // 10')
+                  OPEN_BOTS=$(( OPEN_BOTS_PER_NODE * NODE_COUNT ))
                   QUIET_BOTS=$(echo "$CONFIG" | jq -r '.quiet_bots // 2')
                   CLOSED_BOTS=$(echo "$CONFIG" | jq -r '.closed_bots // 0')
                   OPEN_SECS=$(( $(echo "$CONFIG" | jq -r '.open_minutes // 8') * 60 ))
                   QUIET_SECS=$(( $(echo "$CONFIG" | jq -r '.quiet_minutes // 3') * 60 ))
                   CLOSED_SECS=$(( $(echo "$CONFIG" | jq -r '.closed_minutes // 3') * 60 ))
-                  echo "using config: open=${OPEN_BOTS}bots/${OPEN_SECS}s quiet=${QUIET_BOTS}bots/${QUIET_SECS}s closed=${CLOSED_BOTS}bots/${CLOSED_SECS}s"
+                  echo "using config: ${NODE_COUNT} nodes, open=${OPEN_BOTS_PER_NODE}/node=${OPEN_BOTS}bots/${OPEN_SECS}s quiet=${QUIET_BOTS}bots/${QUIET_SECS}s closed=${CLOSED_BOTS}bots/${CLOSED_SECS}s"
 
                   echo "=== phase 1/3: market open, applying volatility jolt ==="
+                  MY_OPEN=$(date +%s)
                   curl -sS -m 60 -X POST http://trading-engine.apps.svc.cluster.local/market-open
                   echo
                   scale "$OPEN_BOTS"
-                  sleep "$OPEN_SECS"
+                  phase_sleep "$OPEN_SECS"
 
                   echo "=== phase 2/3: quiet trading ==="
                   scale "$QUIET_BOTS"
-                  sleep "$QUIET_SECS"
+                  phase_sleep "$QUIET_SECS"
 
                   echo "=== phase 3/3: market close ==="
                   curl -sS -m 60 -X POST http://trading-engine.apps.svc.cluster.local/market-close
                   echo
                   scale "$CLOSED_BOTS"
-                  sleep "$CLOSED_SECS"
+                  phase_sleep "$CLOSED_SECS"
 
                   echo "=== cycle complete, next open begins at the next scheduled tick ==="
               resources:

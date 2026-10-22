@@ -20,7 +20,7 @@ data:
     # phase) and by each hft-bot pod (order rate) -- editable via the
     # dashboard's /admin page instead of requiring a redeploy.
     CONFIG_DEFAULTS = {
-        "open_bots": 30,
+        "open_bots_per_node": 10,  # open-phase hft-bot replicas = this * live node count
         "quiet_bots": 2,
         "closed_bots": 0,
         "bot_rate": 50,
@@ -29,7 +29,7 @@ data:
         "closed_minutes": 3,
     }
     CONFIG_BOUNDS = {  # (min, max) inclusive, applied on write
-        "open_bots": (0, 200),
+        "open_bots_per_node": (0, 50),
         "quiet_bots": (0, 200),
         "closed_bots": (0, 200),
         "bot_rate": (1, 500),

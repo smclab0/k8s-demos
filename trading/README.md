@@ -47,7 +47,7 @@ kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/part-of=stock
 | `trading-engine` | Internal HTTP API (`/prices`, `/portfolio?source=user\|bot`, `/trades[?source=&limit=]`, `/events`, `/pending[?source=]`, `POST /order`, `POST /reset`, `POST /market-open`, `POST /market-close`). Orders execute atomically via a Redis Lua script (`ORDER_SCRIPT`) so concurrent orders can't race each other's cash/position updates. The human player and the bot swarm have **separate portfolios** (`portfolio:cash:user` / `portfolio:cash:bot`, same for positions) so they trade the same market independently rather than sharing one pot. Orders placed while the market is closed are queued (`pending_orders`) rather than rejected, and executed in order at the next open. Also snapshots the user's portfolio value every 2s for the history chart. Runs at 3 replicas (see capacity section). |
 | `trading-dashboard` | Public page — live prices + sparklines (26 tickers, one merged view), portfolio with P&L vs. starting balance, a "queued for next open" panel when you have pending orders, trade history (all / mine filter, your own orders highlighted, "mine" reads a dedicated longer-retained list), portfolio value chart with hover crosshair, order form (round quantity-preset buttons 5/10/20/30/40/50, buy / sell / sell all / dump and run / reset my portfolio), sticky two-column layout, live connection indicator, market-phase timeline with countdown (segment widths track actual phase duration), and top-right badges showing live bot count, trading-engine replica count, cluster node count, and orders/sec (read from the k8s API and Redis — see RBAC below) |
 | `hft-bot` | Swarm of bots firing random buy/sell orders every 20-50ms to simulate high-frequency trading load. Baseline 2 replicas; scaled by the `market-open` CronJob during its cycle (see below) |
-| `market-open` (CronJob) | Every 14 minutes, runs a 3-phase session: **open** (8 min: volatility jolt + queued-order drain + `hft-bot` scaled to 30) → **quiet** (3 min: `hft-bot` scaled to 2) → **closed** (3 min: `hft-bot` scaled to 0), then loops. Uses a scoped `market-open` ServiceAccount/Role that can only patch `hft-bot`'s `/scale` subresource. |
+| `market-open` (CronJob) | Every 14 minutes, runs a 3-phase session: **open** (8 min: volatility jolt + queued-order drain + `hft-bot` scaled to `open_bots_per_node` × live node count, default 10/node) → **quiet** (3 min: `hft-bot` scaled to 2) → **closed** (3 min: `hft-bot` scaled to 0), then loops. Uses a scoped `market-open` ServiceAccount with a Role that can only patch `hft-bot`'s `/scale` subresource, plus a ClusterRole that can only `list` nodes (to compute the open-phase count). |
 
 Starting balance: §100,000 simulated cash, per portfolio (user and bot each start fresh).
 Currency symbol is `§` (not real currency).
@@ -73,8 +73,10 @@ It never touches the bot swarm's state.
 ### Market cycle (every 14 minutes)
 
 ```
-open (8 min, hft-bot=30) -> quiet (3 min, hft-bot=2) -> closed (3 min, hft-bot=0) -> repeat
+open (8 min, hft-bot=10/node) -> quiet (3 min, hft-bot=2) -> closed (3 min, hft-bot=0) -> repeat
 ```
+
+On a fresh deploy, `deploy.sh` doesn't wait up to 14 minutes for the first scheduled tick: if Redis has no `market_open` event yet, it starts a cycle immediately with `kubectl create job --from=cronjob/market-open`. Because that job is outside the schedule, `concurrencyPolicy: Forbid` can't see it — instead the cycle script polls `/events` between phases and exits as soon as a newer `market_open` appears, so the kickstart cycle hands over to the first scheduled one rather than fighting it over `hft-bot`'s scale.
 
 Orders placed while closed aren't rejected — they queue (`pending_orders` in Redis) and execute in order at the next open, against whatever price results from that open's volatility jolt.
 See `GET /pending?source=user` and the dashboard's "queued for next open" panel.
@@ -84,22 +86,22 @@ The dashboard's market-status line reflects whichever of `market_open` / `market
 
 ### Live-tunable settings
 
-The bot counts per phase (30/2/0), phase durations (8/3/3 min), and the per-bot order rate (50/sec) are all defaults, not fixed — tune them live, no redeploy needed, via `POST /config` on `trading-engine` directly (or the dashboard's `POST /api/config`, which just proxies it).
+The bot counts per phase (`open_bots_per_node`=10, `quiet_bots`=2, `closed_bots`=0), phase durations (8/3/3 min), and the per-bot order rate (50/sec) are all defaults, not fixed — tune them live, no redeploy needed, via `POST /config` on `trading-engine` directly (or the dashboard's `POST /api/config`, which just proxies it).
 There used to be an `/admin` page for this; it was removed as unnecessary — the same values are just as easy to read/set with `curl`:
 
 ```
 curl -sS http://trading-engine.apps.svc.cluster.local/config
 curl -sS -X POST http://trading-engine.apps.svc.cluster.local/config \
-  -d '{"bot_rate": 3, "open_bots": 50, "quiet_bots": 10}'
+  -d '{"bot_rate": 3, "open_bots_per_node": 5, "quiet_bots": 10}'
 ```
 
 Everything is stored in one Redis hash (`config`) behind that endpoint:
-- **Bot counts** are read by the `market-open` CronJob once at the start of each cycle — a change takes effect at the *next* phase transition, not mid-phase.
+- **Bot counts** are read by the `market-open` CronJob once at the start of each cycle — a change takes effect at the *next* phase transition, not mid-phase. `open_bots_per_node` is multiplied by the live node count at that same moment (read via a `list`-only ClusterRole), so the open-phase swarm size — more nodes, more bots — is never a value you have to update by hand as the cluster grows or shrinks.
 - **Phase durations** (`open_minutes`/`quiet_minutes`/`closed_minutes`) are also snapshotted once per cycle by the CronJob, *and* read live (every check, no caching) by both `trading-engine` and `price-feed` to compute the open/quiet/closed boundaries — all three independently derive the same boundaries from the same config rather than duplicating hardcoded numbers, so they can't drift out of sync with each other.
   The CronJob's own *schedule* (how often a new cycle starts, currently `*/14 * * * *`) is a static Kubernetes field this can't rewrite — if the durations no longer sum to close to that, cycles run back-to-back with a gap or get skipped by `concurrencyPolicy: Forbid`, not corrupted.
 - **Order rate** is re-read by every running `hft-bot` pod roughly every 10s and applied immediately, no restart required.
 
-Keep in mind the ~200 orders/sec cluster-wide ceiling from the capacity section below — cranking bot count × rate well past that just trades throughput for latency and errors (already true of the default 30×50/sec open-phase target, which is deliberately above the empirical sweet spot).
+Keep in mind the ~200 orders/sec cluster-wide ceiling from the capacity section below — cranking bot count × rate well past that just trades throughput for latency and errors. On this 5-node cluster, the default `open_bots_per_node`=10 already means 50 open-phase bots × 50/sec, deliberately (and increasingly, as nodes are added) above the empirical sweet spot — see the capacity section.
 
 ## Capacity: how many hft-bots can this take?
 
@@ -126,7 +128,7 @@ Real `hft-bot` replicas pace themselves (20-50ms sleep between requests, blockin
 Given the ~200 req/sec ceiling and each bot's natural idle-latency rate of ~15-25 req/sec, **the practical sweet spot is roughly 12-20 `hft-bot` replicas** — meaning the original 12-bot swarm was already close to this architecture's real capacity, not far below it as the CPU numbers alone suggested.
 `trading-engine` is kept at 3 replicas (see `trading-engine.yaml`) since it measurably reduces error rate for free; going further only helps once Redis itself is scaled (e.g. Redis Cluster, or splitting hot keys across multiple instances) — out of scope for this demo.
 
-Note: the `market-open` CronJob's **open** phase now scales `hft-bot` to 30, intentionally above this empirical sweet spot — expect a higher (though still bounded, per the 6-replica numbers above) error/latency rate during the first part of each open phase versus the earlier 20-bot cycle.
+Note: the `market-open` CronJob's **open** phase scales `hft-bot` to `open_bots_per_node` (default 10) × the live node count — 50 replicas on this 5-node cluster, intentionally above this empirical sweet spot — expect a higher (though still bounded, per the 6-replica numbers above) error/latency rate during the first part of each open phase, and for it to grow as nodes are added. Lower `open_bots_per_node` via `POST /config` if that's not wanted.
 
 ## Operational incidents
 

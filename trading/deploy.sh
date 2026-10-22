@@ -28,4 +28,15 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 kubectl kustomize "${DIR}" | sed "s/trading\.example\.com/${FQDN}/g" | kubectl apply -f -
 
+# The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
+# dashboard showing "no session recorded yet" until then. If no market_open has
+# ever been recorded, start a cycle right now from the CronJob's own template;
+# it hands over to the next scheduled tick by itself (see phase_sleep in
+# market-open-cron.yaml). Skipped on a redeploy when a session already exists.
+if ! kubectl -n apps exec deploy/redis -- redis-cli lrange events 0 19 2>/dev/null | grep -q market_open; then
+  kubectl -n apps rollout status deploy/trading-engine --timeout=180s
+  kubectl -n apps create job --from=cronjob/market-open "market-open-kickstart-$(date +%s)"
+  echo "No session recorded yet -- started the first market cycle now."
+fi
+
 echo "Deployed. Dashboard: https://${FQDN}/"
