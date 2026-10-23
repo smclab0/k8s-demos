@@ -6,8 +6,10 @@ metadata:
 data:
   dashboard.py: |
     import json
+    import os
     import socket
     import ssl
+    import threading
     import time
     import urllib.request
     import urllib.error
@@ -48,6 +50,51 @@ data:
         req = urllib.request.Request(f"https://kubernetes.default.svc{path}", headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(req, context=ctx, timeout=2) as resp:
             return json.load(resp)
+
+    def k8s_api_json_patch(path, ops):
+        with open(K8S_TOKEN_PATH) as f:
+            token = f.read().strip()
+        ctx = ssl.create_default_context(cafile=K8S_CA_PATH)
+        req = urllib.request.Request(
+            f"https://kubernetes.default.svc{path}", data=json.dumps(ops).encode(), method="PATCH",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json-patch+json"})
+        with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+            return json.load(resp)
+
+    # The Ingress host isn't baked into ingress.yaml: this pod sets it to
+    # trading.<its node's IP>.<WILDCARD_DNS> (NODE_IP comes from the downward
+    # API), so it works on whatever cluster and node it's deployed to -- traefik
+    # listens on every node's :80/:443, so any node's IP reaches it. TRADING_HOST
+    # pins a fixed hostname instead. Re-checked every minute, so a re-apply or
+    # hand edit that changes the host gets put back.
+    INGRESS_PATH = f"/apis/networking.k8s.io/v1/namespaces/{K8S_NAMESPACE}/ingresses/trading-dashboard"
+
+    def desired_ingress_host():
+        fixed = os.environ.get("TRADING_HOST", "").strip()
+        if fixed:
+            return fixed
+        node_ip = os.environ.get("NODE_IP", "").strip()
+        if not node_ip:
+            return None
+        return f"trading.{node_ip}.{os.environ.get('WILDCARD_DNS', '').strip() or 'sslip.io'}"
+
+    def ingress_host_loop():
+        while True:
+            try:
+                want = desired_ingress_host()
+                if want:
+                    spec = k8s_api_get(INGRESS_PATH)["spec"]
+                    ops = []
+                    if spec["rules"][0].get("host") != want:
+                        ops.append({"op": "replace", "path": "/spec/rules/0/host", "value": want})
+                    if spec.get("tls") and spec["tls"][0]["hosts"][0] != want:
+                        ops.append({"op": "replace", "path": "/spec/tls/0/hosts/0", "value": want})
+                    if ops:
+                        k8s_api_json_patch(INGRESS_PATH, ops)
+                        print(f"ingress host set to {want}", flush=True)
+            except Exception as e:
+                print(f"ingress host update failed: {e}", flush=True)
+            time.sleep(60)
 
     def get_bot_count():
         try:
@@ -830,6 +877,8 @@ data:
         def log_message(self, fmt, *args):
             pass
 
+    threading.Thread(target=ingress_host_loop, daemon=True).start()
+
     ThreadingHTTPServer(("0.0.0.0", 80), Handler).serve_forever()
 ---
 apiVersion: apps/v1
@@ -856,6 +905,16 @@ spec:
           command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/dashboard.py"]
           ports:
             - containerPort: 80
+          env:
+            # Used to set the Ingress host (see ingress_host_loop above).
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: WILDCARD_DNS
+              value: "sslip.io"
+            - name: TRADING_HOST
+              value: ""  # set to pin a fixed hostname instead, e.g. trading.smclab.net
           resources:
             requests:
               cpu: 50m

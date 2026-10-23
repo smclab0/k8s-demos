@@ -2,25 +2,27 @@
 
 Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
-The checked-in configs (`trading/`) use a generic placeholder for this cluster's real hostname (`ingress.yaml`'s host) — `trading/deploy.sh` resolves the real, live one dynamically from the cluster at apply time (or pin a fixed one via a local, gitignored overlay, `overlays/local/`) — see Deploying below.
+No hostname or IP is baked into the code: the checked-in Ingress (`ingress.yaml`) only has a placeholder, `trading.node-ip.sslip.io`, and once running the **dashboard pod sets its own Ingress host** to `trading.<its node's IP>.sslip.io` (node IP from the downward API's `status.hostIP`; see `ingress_host_loop` in `dashboard.yaml`, allowed by the `trading-dashboard-set-ingress-host` Role, which can only `get`/`patch` that one Ingress). It re-checks every minute, so a re-apply or hand edit gets put back.
+So it works on whatever cluster and node it's deployed to — however it's deployed. The catch: the URL follows the pod, so it changes if the dashboard is rescheduled onto another node (`deploy.sh` prints the current one; or `kubectl -n apps get ingress trading-dashboard`).
+traefik runs as a DaemonSet listening on every node's `:80`/`:443` (`hostPort`), which is why any node's IP reaches it.
 The dashboard is a `ClusterIP` Service, reachable only through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
 Switched to `traefik` instead, which works correctly.
 
 ## Deploying
 
-Everything here is one Kustomize app — 23 resources (the `apps` Namespace, ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob). Deploy or update with:
+Everything here is one Kustomize app — 27 resources (the `apps` Namespace, ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob). Deploy or update with:
 
 ```
 trading/deploy.sh
 ```
 
-This is the normal way to deploy. It looks up the cluster's own `traefik` Service (by label, `app.kubernetes.io/name=rke2-traefik`, wherever it lives) for its *current* LoadBalancer IP, then applies `trading/` with the Ingress host set to `trading.<that-ip>.sslip.io` — resolved fresh from the cluster every run, so it's never a stale value baked into a file and never needs editing by hand, even if traefik's IP changes later.
+This is the normal way to deploy. It applies `trading/`, starts a first market cycle if none has run yet, waits for the dashboard to set the Ingress host (see above), and prints the dashboard's URL.
 
 Two alternatives, if you don't want that:
 
-- Change the hostname with environment variables instead of editing files: `WILDCARD_DNS=nip.io trading/deploy.sh` swaps the wildcard-DNS domain (default `sslip.io`), and `TRADING_HOST=trading.smclab.net trading/deploy.sh` uses a fixed hostname and skips the traefik IP lookup (you create its DNS record).
-- `kubectl apply -k trading/` directly deploys with the generic placeholder hostname baked into `trading/` (`trading.example.com`, which won't resolve anywhere real) — useful for `--dry-run=server`/CI or when you don't need the Ingress reachable at all.
+- Change the hostname with environment variables instead of editing files: `WILDCARD_DNS=nip.io trading/deploy.sh` swaps the wildcard-DNS domain (default `sslip.io`), and `TRADING_HOST=trading.smclab.net trading/deploy.sh` pins a fixed hostname instead of the node IP (you create its DNS record). `deploy.sh` passes both to the dashboard as env vars on every run, so leaving one out returns it to its default.
+- `kubectl apply -k trading/` works too — the dashboard sets the host the same way; you just have to look the URL up yourself.
 - To pin a fixed hostname instead of letting it track the live IP, use the local, gitignored overlay (`overlays/local/`); create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`), then `kubectl apply -k overlays/local/`.
 
 It's safe to re-run any time — `kubectl apply` is idempotent, and none of the Deployments' pod templates or selectors are touched by re-applying, so a re-apply after only editing one file (e.g. `dashboard.yaml`) won't restart unrelated components.
@@ -158,7 +160,7 @@ kubectl scale deployment/hft-bot -n apps --replicas=2
 kubectl create job market-open-manual --from=cronjob/market-open -n apps
 
 # reset just your own portfolio (cash/positions/trade history) -- same as the dashboard button
-curl -sS -X POST https://trading.<ingress-ip>.sslip.io/reset
+curl -sS -X POST https://trading.<node-ip>.sslip.io/reset
 
 # wipe ALL trading state for everyone (prices, both portfolios, trades, events, history)
 kubectl exec -n apps deploy/redis -- redis-cli FLUSHALL

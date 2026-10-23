@@ -11,10 +11,12 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    # trading.example.com is a placeholder -- override via a local overlay
-    # (see overlays/local/, not checked into git) with your own
-    # hostname, e.g. trading.<traefik's external IP>.sslip.io.
-    - host: trading.example.com
+    # Placeholder only: once running, the dashboard pod replaces it (here and
+    # in tls below) with trading.<its node's IP>.sslip.io -- see
+    # ingress_host_loop in dashboard.yaml. sslip.io resolves that name to the
+    # embedded IP, and traefik listens on every node's :80/:443 (hostPort), so
+    # it works on whatever cluster/node this is deployed to.
+    - host: trading.node-ip.sslip.io
       http:
         paths:
           - path: /
@@ -26,5 +28,5 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - trading.example.com
+        - trading.node-ip.sslip.io
       secretName: trading-dashboard-tls

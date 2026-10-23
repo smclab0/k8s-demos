@@ -1,45 +1,24 @@
 #!/usr/bin/env bash
-# Deploys the trading demo with the Ingress host set to a live wildcard-DNS
-# FQDN (trading.<traefik-ip>.sslip.io by default) derived from the cluster's
-# own traefik LoadBalancer IP, resolved fresh from the cluster at apply time
-# -- so it's never a stale value baked into a file (unlike the static option
-# in overlays/local/).
+# Deploys the trading demo. The Ingress host isn't set here: once running, the
+# dashboard pod points its own Ingress at trading.<its node's IP>.sslip.io
+# (see ingress_host_loop in dashboard.yaml), so this works on whatever cluster
+# it's deployed to, and so does a plain `kubectl apply -k trading/`.
 #
 # Usage: trading/deploy.sh
-# Optional environment variables:
-#   WILDCARD_DNS      wildcard-DNS domain for the default host (default: sslip.io,
+# Optional environment variables (passed to the dashboard on every run, so
+# leaving one out returns it to its default):
+#   WILDCARD_DNS      wildcard-DNS domain for the host (default: sslip.io,
 #                     e.g. nip.io works the same way)
 #   TRADING_HOST      full hostname to use instead (e.g. trading.smclab.net);
-#                     skips the traefik IP lookup -- its DNS record is up to you
+#                     its DNS record is up to you
 set -euo pipefail
 
-WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}"
-
-if [ -n "${TRADING_HOST:-}" ]; then
-  FQDN="${TRADING_HOST}"
-else
-  TRAEFIK_SVC=$(kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik \
-    -o jsonpath='{.items[0].metadata.namespace}{" "}{.items[0].metadata.name}')
-
-  if [ -z "${TRAEFIK_SVC}" ]; then
-    echo "Could not find the traefik Service (kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik)" >&2
-    exit 1
-  fi
-  read -r TRAEFIK_NS TRAEFIK_NAME <<< "${TRAEFIK_SVC}"
-
-  TRAEFIK_IP=$(kubectl get svc "${TRAEFIK_NAME}" -n "${TRAEFIK_NS}" \
-    -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
-  if [ -z "${TRAEFIK_IP}" ]; then
-    echo "traefik Service ${TRAEFIK_NS}/${TRAEFIK_NAME} has no LoadBalancer IP yet" >&2
-    exit 1
-  fi
-
-  FQDN="trading.${TRAEFIK_IP}.${WILDCARD_DNS}"
-fi
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-kubectl kustomize "${DIR}" | sed "s/trading\.example\.com/${FQDN}/g" | kubectl apply -f -
+kubectl apply -k "${DIR}"
+# No-op (no restart) when the values haven't changed.
+kubectl -n apps set env deploy/trading-dashboard \
+  WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}" TRADING_HOST="${TRADING_HOST:-}"
 
 # The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
 # dashboard showing "no session recorded yet" until then. If no market_open has
@@ -52,4 +31,11 @@ if ! kubectl -n apps exec deploy/redis -- redis-cli lrange events 0 19 2>/dev/nu
   echo "No session recorded yet -- started the first market cycle now."
 fi
 
-echo "Deployed. Dashboard: https://${FQDN}/"
+# Wait for the dashboard to replace ingress.yaml's placeholder host.
+kubectl -n apps rollout status deploy/trading-dashboard --timeout=180s
+for _ in $(seq 60); do
+  HOST=$(kubectl -n apps get ingress trading-dashboard -o jsonpath='{.spec.rules[0].host}')
+  [ "${HOST}" != "trading.node-ip.sslip.io" ] && break
+  sleep 2
+done
+echo "Deployed. Dashboard: https://${HOST}/"
