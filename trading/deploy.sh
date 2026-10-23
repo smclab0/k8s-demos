@@ -1,29 +1,43 @@
 #!/usr/bin/env bash
-# Deploys the trading demo with the Ingress host set to a live sslip.io
-# FQDN derived from the cluster's own traefik LoadBalancer IP, resolved
-# fresh from the cluster at apply time -- so it's never a stale value
-# baked into a file (unlike the static option in overlays/local/).
+# Deploys the trading demo with the Ingress host set to a live wildcard-DNS
+# FQDN (trading.<traefik-ip>.sslip.io by default) derived from the cluster's
+# own traefik LoadBalancer IP, resolved fresh from the cluster at apply time
+# -- so it's never a stale value baked into a file (unlike the static option
+# in overlays/local/).
+#
 # Usage: trading/deploy.sh
+# Optional environment variables:
+#   WILDCARD_DNS      wildcard-DNS domain for the default host (default: sslip.io,
+#                     e.g. nip.io works the same way)
+#   TRADING_HOST      full hostname to use instead (e.g. trading.smclab.net);
+#                     skips the traefik IP lookup -- its DNS record is up to you
+#   TRADING_PASSWORD  login password, needed on the first run only (see below)
 set -euo pipefail
 
-TRAEFIK_SVC=$(kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik \
-  -o jsonpath='{.items[0].metadata.namespace}{" "}{.items[0].metadata.name}')
+WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}"
 
-if [ -z "${TRAEFIK_SVC}" ]; then
-  echo "Could not find the traefik Service (kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik)" >&2
-  exit 1
+if [ -n "${TRADING_HOST:-}" ]; then
+  FQDN="${TRADING_HOST}"
+else
+  TRAEFIK_SVC=$(kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik \
+    -o jsonpath='{.items[0].metadata.namespace}{" "}{.items[0].metadata.name}')
+
+  if [ -z "${TRAEFIK_SVC}" ]; then
+    echo "Could not find the traefik Service (kubectl get svc -A -l app.kubernetes.io/name=rke2-traefik)" >&2
+    exit 1
+  fi
+  read -r TRAEFIK_NS TRAEFIK_NAME <<< "${TRAEFIK_SVC}"
+
+  TRAEFIK_IP=$(kubectl get svc "${TRAEFIK_NAME}" -n "${TRAEFIK_NS}" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+  if [ -z "${TRAEFIK_IP}" ]; then
+    echo "traefik Service ${TRAEFIK_NS}/${TRAEFIK_NAME} has no LoadBalancer IP yet" >&2
+    exit 1
+  fi
+
+  FQDN="trading.${TRAEFIK_IP}.${WILDCARD_DNS}"
 fi
-read -r TRAEFIK_NS TRAEFIK_NAME <<< "${TRAEFIK_SVC}"
-
-TRAEFIK_IP=$(kubectl get svc "${TRAEFIK_NAME}" -n "${TRAEFIK_NS}" \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
-if [ -z "${TRAEFIK_IP}" ]; then
-  echo "traefik Service ${TRAEFIK_NS}/${TRAEFIK_NAME} has no LoadBalancer IP yet" >&2
-  exit 1
-fi
-
-FQDN="trading.${TRAEFIK_IP}.sslip.io"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The dashboard's shared login password lives in a Secret that is never

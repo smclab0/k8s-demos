@@ -20,6 +20,7 @@ This is the normal way to deploy. It looks up the cluster's own `traefik` Servic
 
 Two alternatives, if you don't want that:
 
+- Change the hostname with environment variables instead of editing files: `WILDCARD_DNS=nip.io trading/deploy.sh` swaps the wildcard-DNS domain (default `sslip.io`), and `TRADING_HOST=trading.smclab.net trading/deploy.sh` uses a fixed hostname and skips the traefik IP lookup (you create its DNS record).
 - `kubectl apply -k trading/` directly deploys with the generic placeholder hostname baked into `trading/` (`trading.example.com`, which won't resolve anywhere real) — useful for `--dry-run=server`/CI or when you don't need the Ingress reachable at all.
 - To pin a fixed hostname instead of letting it track the live IP, use the local, gitignored overlay (`overlays/local/`); create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`), then `kubectl apply -k overlays/local/`.
 
