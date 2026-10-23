@@ -12,8 +12,7 @@ Switched to `traefik` instead, which works correctly.
 Everything here is one Kustomize app — 23 resources (the `apps` Namespace, ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob). Deploy or update with:
 
 ```
-TRADING_PASSWORD='...' trading/deploy.sh   # first run only -- creates the login Secret
-trading/deploy.sh                          # every run after that
+trading/deploy.sh
 ```
 
 This is the normal way to deploy. It looks up the cluster's own `traefik` Service (by label, `app.kubernetes.io/name=rke2-traefik`, wherever it lives) for its *current* LoadBalancer IP, then applies `trading/` with the Ingress host set to `trading.<that-ip>.sslip.io` — resolved fresh from the cluster every run, so it's never a stale value baked into a file and never needs editing by hand, even if traefik's IP changes later.
@@ -34,28 +33,11 @@ Every resource carries the label `app.kubernetes.io/part-of=stock-trading-demo`,
 kubectl get all,cronjob,sa,role,rolebinding,clusterrole,clusterrolebinding \
   -l app.kubernetes.io/part-of=stock-trading-demo -n apps
 
-kubectl delete all,cronjob,sa,role,rolebinding,configmap,secret,ingress \
+kubectl delete all,cronjob,sa,role,rolebinding,configmap \
   -l app.kubernetes.io/part-of=stock-trading-demo -n apps
 # ClusterRole/ClusterRoleBinding aren't namespaced -- delete those separately if tearing down for good:
 kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/part-of=stock-trading-demo
 ```
-
-## Version
-
-The dashboard footer and the login page show which version is running, e.g. `version ffe8098 · 2026-10-23`: the short hash and date of the **last git commit that touched `trading/`**, stamped in by `deploy.sh` as `APP_VERSION`/`APP_VERSION_DATE` env vars on `trading-dashboard`.
-A `-dirty` suffix means it was deployed with uncommitted changes in `trading/`; `unversioned` means it was applied without `deploy.sh` (e.g. a plain `kubectl apply -k trading/`).
-Because a new version changes the dashboard's pod template, deploying one also restarts the dashboard onto its updated ConfigMap. Other components still need a manual `rollout restart` after a ConfigMap-only change (see Deploying).
-
-## Logins
-
-The dashboard requires a login. There are nine accounts, `user1` … `user9` (the `TRADING_USERS` env var on `trading-dashboard` in `dashboard.yaml`), sharing one password.
-**The password is never committed — this repo is public.** It lives in the `trading-users` Secret, which `deploy.sh` creates from `$TRADING_PASSWORD` the first time it runs (and refuses to deploy without, if the Secret doesn't exist yet); later runs leave it alone.
-To change it: `kubectl -n apps delete secret trading-users`, re-run `TRADING_PASSWORD='<new>' trading/deploy.sh`, then `kubectl -n apps rollout restart deploy/trading-dashboard` (the password is read into an env var at pod start).
-
-- Each user has **their own portfolio** — their username is the engine `source` (alongside the bot swarm's `bot`), so `portfolio:cash:user3`, `trades:user3`, `history:portfolio:user3` and so on. "Mine" in the trade list, the portfolio chart, pending orders and "reset my portfolio" are all per user.
-- Sessions are random tokens in Redis (`session:<token>`, 12h TTL) behind an `HttpOnly`, `SameSite=Lax` cookie (`Secure` when traefik reports https).
-- 10 failed logins for one username lock it for 15 minutes (`login_fail:<username>`).
-- Every dashboard route except `/login` needs a session, including `POST /api/config` — so any logged-in user can retune the bot settings.
 
 ## Components
 
@@ -64,7 +46,7 @@ To change it: `kubectl -n apps delete secret trading-users`, re-run `TRADING_PAS
 | `redis` | Shared state: live prices, portfolios (cash/positions), trade history, events, history series |
 | `price-feed` | Random-walk price simulator for 26 tickers (AAA-ZZZ), updates every 2s, also records per-ticker price history |
 | `trading-engine` | Internal HTTP API (`/prices`, `/portfolio?source=user\|bot`, `/trades[?source=&limit=]`, `/events`, `/pending[?source=]`, `POST /order`, `POST /reset`, `POST /market-open`, `POST /market-close`). Orders execute atomically via a Redis Lua script (`ORDER_SCRIPT`) so concurrent orders can't race each other's cash/position updates. The human player and the bot swarm have **separate portfolios** (`portfolio:cash:user` / `portfolio:cash:bot`, same for positions) so they trade the same market independently rather than sharing one pot. Orders placed while the market is closed are queued (`pending_orders`) rather than rejected, and executed in order at the next open. Also snapshots the user's portfolio value every 2s for the history chart. Runs at 1 replica (see capacity section). |
-| `trading-dashboard` | Login-protected page (see Logins) — live prices + sparklines (26 tickers, one merged view), portfolio with P&L vs. starting balance, a "queued for next open" panel when you have pending orders, trade history (all / mine filter, your own orders highlighted, "mine" reads a dedicated longer-retained list), portfolio value chart with hover crosshair, order form (round quantity-preset buttons 5/10/20/30/40/50, buy / sell / sell all / dump and run / reset my portfolio), sticky two-column layout, live connection indicator, market-phase timeline with countdown (segment widths track actual phase duration), and top-right badges showing live bot count, trading-engine replica count, cluster node count, and orders/sec (read from the k8s API and Redis — see RBAC below) |
+| `trading-dashboard` | Public page — live prices + sparklines (26 tickers, one merged view), portfolio with P&L vs. starting balance, a "queued for next open" panel when you have pending orders, trade history (all / mine filter, your own orders highlighted, "mine" reads a dedicated longer-retained list), portfolio value chart with hover crosshair, order form (round quantity-preset buttons 5/10/20/30/40/50, buy / sell / sell all / dump and run / reset my portfolio), sticky two-column layout, live connection indicator, market-phase timeline with countdown (segment widths track actual phase duration), and top-right badges showing live bot count, trading-engine replica count, cluster node count, and orders/sec (read from the k8s API and Redis — see RBAC below) |
 | `hft-bot` | Swarm of bots firing random buy/sell orders every 20-50ms to simulate high-frequency trading load. No `replicas` in the manifest, so re-applying it never overrides the scale the `market-open` CronJob sets during its cycle (see below); a fresh install starts at 1 until the first cycle scales it |
 | `market-open` (CronJob) | Every 14 minutes, runs a 3-phase session: **open** (8 min: volatility jolt + queued-order drain + `hft-bot` scaled to `open_bots_per_node` × live node count, default 3/node) → **quiet** (3 min: `hft-bot` scaled to 2) → **closed** (3 min: `hft-bot` scaled to 0), then loops. Uses a scoped `market-open` ServiceAccount with a Role that can only patch `hft-bot`'s `/scale` subresource, plus a ClusterRole that can only `list` nodes (to compute the open-phase count). |
 

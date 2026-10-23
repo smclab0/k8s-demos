@@ -11,7 +11,6 @@
 #                     e.g. nip.io works the same way)
 #   TRADING_HOST      full hostname to use instead (e.g. trading.smclab.net);
 #                     skips the traefik IP lookup -- its DNS record is up to you
-#   TRADING_PASSWORD  login password, needed on the first run only (see below)
 set -euo pipefail
 
 WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}"
@@ -40,33 +39,7 @@ else
 fi
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# The dashboard's shared login password lives in a Secret that is never
-# committed (this repo is public). Created once from $TRADING_PASSWORD; later
-# runs leave it alone. To change it: delete the Secret, re-run with the new
-# value, then `kubectl -n apps rollout restart deploy/trading-dashboard`.
-if ! kubectl -n apps get secret trading-users >/dev/null 2>&1; then
-  if [ -z "${TRADING_PASSWORD:-}" ]; then
-    echo "Secret apps/trading-users doesn't exist yet -- re-run as: TRADING_PASSWORD='...' trading/deploy.sh" >&2
-    exit 1
-  fi
-  kubectl get namespace apps >/dev/null 2>&1 || kubectl create namespace apps
-  printf '%s' "${TRADING_PASSWORD}" | kubectl -n apps create secret generic trading-users --from-file=password=/dev/stdin
-  kubectl -n apps label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
-fi
-
-# Version shown on the dashboard: the last commit that touched trading/, so
-# commits elsewhere in the repo don't change it (or restart the dashboard).
-VERSION=$(git -C "${DIR}" log -1 --format=%h -- . 2>/dev/null || true)
-VERSION_DATE=$(git -C "${DIR}" log -1 --format=%cs -- . 2>/dev/null || true)
-if [ -n "${VERSION}" ] && [ -n "$(git -C "${DIR}" status --porcelain -- . 2>/dev/null)" ]; then
-  VERSION="${VERSION}-dirty"
-fi
-
-kubectl kustomize "${DIR}" \
-  | sed -e "s/trading\.example\.com/${FQDN}/g" \
-        -e "s/value: \"\{0,1\}__APP_VERSION__\"\{0,1\}$/value: \"${VERSION:-unversioned}\"/" \
-        -e "s/value: \"\{0,1\}__APP_VERSION_DATE__\"\{0,1\}$/value: \"${VERSION_DATE}\"/" \
-  | kubectl apply -f -
+kubectl kustomize "${DIR}" | sed "s/trading\.example\.com/${FQDN}/g" | kubectl apply -f -
 
 # The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
 # dashboard showing "no session recorded yet" until then. If no market_open has

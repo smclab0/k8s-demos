@@ -5,56 +5,18 @@ metadata:
   namespace: apps
 data:
   dashboard.py: |
-    import hmac
     import json
-    import os
-    import secrets
     import socket
     import ssl
     import time
     import urllib.request
     import urllib.error
-    import urllib.parse
     import redis
-    from http.cookies import SimpleCookie
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True,
                      socket_timeout=2, socket_connect_timeout=2)
     ENGINE = "http://trading-engine.apps.svc.cluster.local"
-
-    # Logins: a fixed list of usernames sharing one password. The password comes
-    # from the trading-users Secret, which deploy.sh creates and which is never
-    # committed (this repo is public). Each user trades their own portfolio --
-    # their username is the engine "source", alongside the bot swarm's "bot".
-    USERS = {u.strip() for u in os.environ.get("TRADING_USERS", "").split(",") if u.strip()}
-    PASSWORD = os.environ.get("TRADING_PASSWORD", "")
-
-    # Stamped in by deploy.sh: the last git commit that touched trading/ (plus
-    # "-dirty" if deployed with uncommitted changes) and that commit's date.
-    # A plain `kubectl apply -k` leaves the placeholders, shown as "unversioned".
-    _version = os.environ.get("APP_VERSION", "")
-    _version_date = os.environ.get("APP_VERSION_DATE", "")
-    VERSION_LABEL = "unversioned" if not _version or _version.startswith("__") else (
-        f"version {_version}" + (f" &middot; {_version_date}" if _version_date and not _version_date.startswith("__") else ""))
-    SESSION_TTL = 12 * 3600
-    MAX_LOGIN_FAILS = 10  # per username, per 15 minutes
-
-    def check_login(username, password):
-        """Returns None on success, else an error message for the login page."""
-        if username not in USERS or not PASSWORD:
-            return "wrong username or password"
-        fails_key = f"login_fail:{username}"
-        if int(r.get(fails_key) or 0) >= MAX_LOGIN_FAILS:
-            return "too many failed attempts -- try again in 15 minutes"
-        if hmac.compare_digest(password.encode(), PASSWORD.encode()):
-            r.delete(fails_key)
-            return None
-        pipe = r.pipeline()
-        pipe.incr(fails_key)
-        pipe.expire(fails_key, 900)
-        pipe.execute()
-        return "wrong username or password"
 
     K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
     K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
@@ -136,35 +98,6 @@ data:
         except (urllib.error.URLError, socket.timeout, TimeoutError):
             return 503, {"error": "trading-engine is busy, try again"}
 
-    LOGIN_PAGE = """<html>
-    <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Stock Trading Demo</title>
-    <style>
-      body { font-family: monospace; background:#0b0f14; color:#dce6f0; margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box; }
-      form { background:#141b22; border:1px solid #2a3542; border-radius:8px; padding:24px; width:100%; max-width:320px; display:flex; flex-direction:column; gap:12px; }
-      h1 { margin:0 0 4px; font-size:1.3em; }
-      label { display:flex; flex-direction:column; gap:4px; font-size:0.9em; color:#8fa0b3; }
-      input, button { background:#0b0f14; color:#dce6f0; border:1px solid #2a3542; padding:8px 10px; border-radius:4px; font-family: monospace; font-size:1em; }
-      button { border-color:#7fd1ff; color:#7fd1ff; cursor:pointer; }
-      .err { color:#f44336; margin:0; font-size:0.9em; }
-      .disclaimer { margin:0; font-size:0.8em; color:#5a6b7d; font-style:italic; }
-    </style>
-    </head>
-    <body>
-      <form method="post" action="/login">
-        <h1>Stock Trading Demo</h1>
-        <p class="disclaimer">This isn't real and only intended to load test a cluster.</p>
-        <p class="disclaimer">{{version}}</p>
-        {{error}}
-        <label>username <input name="username" autocomplete="username" required autofocus></label>
-        <label>password <input name="password" type="password" autocomplete="current-password" required></label>
-        <button type="submit">log in</button>
-      </form>
-    </body>
-    </html>"""
-
     PAGE = """<html>
     <head>
     <meta charset="utf-8">
@@ -190,8 +123,6 @@ data:
       .topbar-row { display:flex; justify-content:space-between; align-items:flex-start; gap:1em; flex-wrap:wrap; }
       .badge-group { display:flex; flex-direction:column; gap:0.4em; align-items:flex-end; }
       .bot-badge { background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 12px; font-size:0.9em; color:var(--ink-dim); white-space:nowrap; }
-      .user-badge { margin:0; display:flex; align-items:center; gap:8px; }
-      .user-badge button { padding:2px 8px; font-size:0.85em; }
       .bot-badge .n { color:var(--accent); font-weight:bold; }
       .bot-badge.idle .n { color:var(--ink-faint); }
       .bot-badge.busy .n { color:var(--live); }
@@ -272,10 +203,6 @@ data:
             <p class="msg" id="msg"></p>
           </div>
           <div class="badge-group">
-            <form class="bot-badge user-badge" method="post" action="/logout">
-              <span id="whoami">signed in</span>
-              <button type="submit">log out</button>
-            </form>
             <div class="bot-badge" id="bot-badge">bots: …</div>
             <div class="bot-badge" id="engine-badge">engines: …</div>
             <div class="bot-badge" id="node-badge">nodes: …</div>
@@ -362,7 +289,6 @@ data:
         let tradeFilter = 'all';
         let lastGoodRefresh = 0;
         let lastEvents = [];
-        let CURRENT_USER = null;
         const STARTING_CASH = 100000;
         let CYCLE_PHASES = [['open', 480], ['quiet', 180], ['closed', 180]]; // updated live from /api/config
 
@@ -389,7 +315,7 @@ data:
           const rows = tradeFilter === 'mine' ? lastUserTrades : lastTrades;
           document.getElementById('trades').innerHTML = '<tr><th>time</th><th>side</th><th>symbol</th><th>qty</th><th>price</th></tr>' +
             (rows.length
-              ? rows.map(t => `<tr class="${t.source === CURRENT_USER ? 'mine' : ''}"><td>${t.time}</td><td>${t.side.toUpperCase()}</td><td>${t.symbol}</td><td>${fmt(t.qty)}</td><td>§${fmt(t.price)}</td></tr>`).join('')
+              ? rows.map(t => `<tr class="${t.source === 'user' ? 'mine' : ''}"><td>${t.time}</td><td>${t.side.toUpperCase()}</td><td>${t.symbol}</td><td>${fmt(t.qty)}</td><td>§${fmt(t.price)}</td></tr>`).join('')
               : `<tr><td colspan="5">${tradeFilter === 'mine' ? 'no orders placed yet' : 'no trades yet'}</td></tr>`);
         }
 
@@ -549,14 +475,9 @@ data:
         async function refresh() {
           try {
             const resp = await fetch('/api/state', {cache: 'no-store'});
-            if (resp.status === 401) { location.href = '/login'; return; }
             if (!resp.ok) { updateConnStatus(false); return; }
             const data = await resp.json();
             updateConnStatus(true);
-            if (data.user && data.user !== CURRENT_USER) {
-              CURRENT_USER = data.user;
-              document.getElementById('whoami').textContent = `signed in as ${CURRENT_USER}`;
-            }
 
             const badge = document.getElementById('bot-badge');
             const bots = data.bots || {};
@@ -799,7 +720,6 @@ data:
       <div class="footer">
         <p class="byline">by Steve McBride &middot; built by AI</p>
         <p class="disclaimer">This isn't real and only intended to load test a cluster.</p>
-        <p class="disclaimer">{{version}}</p>
       </div>
     </body>
     </html>"""
@@ -815,63 +735,14 @@ data:
         def _json(self, code, obj):
             self._send(code, "application/json; charset=utf-8", json.dumps(obj).encode("utf-8"))
 
-        def _redirect(self, location, cookie=None):
-            self.send_response(303)
-            self.send_header("Location", location)
-            if cookie:
-                self.send_header("Set-Cookie", cookie)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        def _login_page(self, code, error=""):
-            html = f'<p class="err">{error}</p>' if error else ""
-            self._send(code, "text/html; charset=utf-8", LOGIN_PAGE.replace("{{error}}", html).replace("{{version}}", VERSION_LABEL).encode("utf-8"))
-
-        def _session_token(self):
-            morsel = SimpleCookie(self.headers.get("Cookie", "")).get("session")
-            return morsel.value if morsel else None
-
-        def _user(self):
-            token = self._session_token()
-            if not token:
-                return None
-            try:
-                return r.get(f"session:{token}")
-            except Exception:
-                return None
-
-        def _cookie(self, value, max_age):
-            # Secure only when traefik says the client used https, so a plain-http
-            # port-forward still works for debugging.
-            secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
-            return f"session={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
-
-        def _form(self):
-            length = int(self.headers.get("Content-Length", 0))
-            return {k: v[0] for k, v in urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
-
         def do_GET(self):
-            path = urllib.parse.urlsplit(self.path).path
-            if path == "/login":
-                if self._user():
-                    self._redirect("/")
-                else:
-                    self._login_page(200)
-                return
-            user = self._user()
-            if not user:
-                if path.startswith("/api/"):
-                    self._json(401, {"error": "not logged in"})
-                else:
-                    self._redirect("/login")
-                return
-            if path == "/api/state":
+            if self.path == "/api/state":
                 try:
                     prices = r.hgetall("prices")
                 except Exception:
                     prices = {}
                 try:
-                    portfolio = engine_get(f"/portfolio?source={user}", timeout=2)
+                    portfolio = engine_get("/portfolio?source=user", timeout=2)
                 except Exception:
                     portfolio = {"cash": 0, "positions": {}, "total_value": 0}
                 try:
@@ -879,7 +750,7 @@ data:
                 except Exception:
                     trades = []
                 try:
-                    user_trades = engine_get(f"/trades?source={user}&limit=49", timeout=2)
+                    user_trades = engine_get("/trades?source=user&limit=49", timeout=2)
                 except Exception:
                     user_trades = []
                 try:
@@ -887,7 +758,7 @@ data:
                 except Exception:
                     events = []
                 try:
-                    pending = engine_get(f"/pending?source={user}", timeout=2)
+                    pending = engine_get("/pending?source=user", timeout=2)
                 except Exception:
                     pending = []
                 bots = get_bot_count()
@@ -895,14 +766,14 @@ data:
                 nodes = get_node_count()
                 orders_per_sec = get_orders_per_sec()
                 self._json(200, {
-                    "user": user, "prices": prices, "portfolio": portfolio, "trades": trades,
+                    "prices": prices, "portfolio": portfolio, "trades": trades,
                     "user_trades": user_trades, "events": events, "bots": bots, "engines": engines,
                     "nodes": nodes, "orders_per_sec": orders_per_sec, "pending": pending,
                 })
                 return
-            if path == "/api/history":
+            if self.path == "/api/history":
                 try:
-                    portfolio_hist = [json.loads(x) for x in r.lrange(f"history:portfolio:{user}", -150, -1)]
+                    portfolio_hist = [json.loads(x) for x in r.lrange("history:portfolio", -150, -1)]
                 except Exception:
                     portfolio_hist = []
                 price_hist = {}
@@ -918,45 +789,17 @@ data:
                     price_hist = {}
                 self._json(200, {"portfolio": portfolio_hist, "prices": price_hist})
                 return
-            if path == "/api/config":
+            if self.path == "/api/config":
                 try:
                     self._json(200, engine_get("/config", timeout=2))
                 except Exception:
                     self._json(503, {"error": "trading-engine unreachable"})
                 return
-            self._send(200, "text/html; charset=utf-8", PAGE.replace("{{version}}", VERSION_LABEL).encode("utf-8"))
+            self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
 
         def do_POST(self):
-            if self.path == "/login":
-                form = self._form()
-                username = form.get("username", "").strip()
-                try:
-                    error = check_login(username, form.get("password", ""))
-                    token = None if error else secrets.token_urlsafe(32)
-                    if token:
-                        r.set(f"session:{token}", username, ex=SESSION_TTL)
-                except Exception:
-                    error = "login unavailable, try again"
-                if error:
-                    self._login_page(401, error)
-                else:
-                    self._redirect("/", self._cookie(token, SESSION_TTL))
-                return
-            if self.path == "/logout":
-                token = self._session_token()
-                if token:
-                    try:
-                        r.delete(f"session:{token}")
-                    except Exception:
-                        pass
-                self._redirect("/login", self._cookie("", 0))
-                return
-            user = self._user()
-            if not user:
-                self._json(401, {"error": "not logged in"})
-                return
             if self.path == "/reset":
-                status, resp = engine_post("/reset", {"source": user})
+                status, resp = engine_post("/reset", {"source": "user"})
                 self._json(status, resp)
                 return
             if self.path == "/api/config":
@@ -980,7 +823,7 @@ data:
                 return
             status, resp = engine_post("/order", {
                 "symbol": data.get("symbol"), "side": data.get("side"), "qty": data.get("qty"),
-                "source": user,
+                "source": "user",
             })
             self._json(status, resp)
 
@@ -1013,22 +856,6 @@ spec:
           command: ["sh", "-c", "pip install --no-cache-dir redis >/tmp/pip.log 2>&1 && python3 /app/dashboard.py"]
           ports:
             - containerPort: 80
-          env:
-            - name: TRADING_USERS
-              value: "user1,user2,user3,user4,user5,user6,user7,user8,user9"
-            # Placeholders replaced by deploy.sh with the deployed git version.
-            # A new version changes the pod template, so it also restarts the
-            # dashboard onto its updated ConfigMap.
-            - name: APP_VERSION
-              value: "__APP_VERSION__"
-            - name: APP_VERSION_DATE
-              value: "__APP_VERSION_DATE__"
-            # Created by deploy.sh from $TRADING_PASSWORD -- never committed.
-            - name: TRADING_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: trading-users
-                  key: password
           resources:
             requests:
               cpu: 50m
