@@ -62,21 +62,64 @@ data:
             return json.load(resp)
 
     # The Ingress host isn't baked into ingress.yaml: this pod sets it to
-    # trading.<its node's IP>.<WILDCARD_DNS> (NODE_IP comes from the downward
-    # API), so it works on whatever cluster and node it's deployed to -- traefik
-    # listens on every node's :80/:443, so any node's IP reaches it. TRADING_HOST
-    # pins a fixed hostname instead. Re-checked every minute, so a re-apply or
-    # hand edit that changes the host gets put back.
+    # trading.<its node's address>.<WILDCARD_DNS>, so it works on whatever
+    # cluster and node it's deployed to -- traefik listens on every node's
+    # :80/:443, so any node's address reaches it. TRADING_HOST pins a fixed
+    # hostname instead. Re-checked every 5s: every `kubectl apply` (e.g.
+    # deploy.sh) resets the host to ingress.yaml's placeholder, so this keeps
+    # that outage to a few seconds.
     INGRESS_PATH = f"/apis/networking.k8s.io/v1/namespaces/{K8S_NAMESPACE}/ingresses/trading-dashboard"
+    NODE_ADDRESS_TTL = 300  # re-resolve every 5 min; a node's address rarely changes
+
+    def aws_public_ip():
+        # EC2 instance metadata (IMDSv2). Self-managed k3s/rke2 on EC2 usually
+        # don't record the public IP on the Node object, but the instance knows
+        # it. Fails fast (and harmlessly) anywhere that isn't EC2.
+        try:
+            token_req = urllib.request.Request("http://169.254.169.254/latest/api/token", method="PUT",
+                                               headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+            with urllib.request.urlopen(token_req, timeout=1) as resp:
+                token = resp.read().decode()
+            ip_req = urllib.request.Request("http://169.254.169.254/latest/meta-data/public-ipv4",
+                                            headers={"X-aws-ec2-metadata-token": token})
+            with urllib.request.urlopen(ip_req, timeout=1) as resp:
+                return resp.read().decode().strip() or None
+        except Exception:
+            return None
+
+    def node_address():
+        """This pod's node's externally reachable address: its ExternalIP if the
+        cluster records one (EKS and most managed clouds), else the EC2 public IP,
+        else its InternalIP (status.hostIP) -- right for an on-prem cluster, but
+        a private VPC address on a cloud."""
+        node_name = os.environ.get("NODE_NAME", "").strip()
+        if node_name:
+            try:
+                for addr in k8s_api_get(f"/api/v1/nodes/{node_name}")["status"].get("addresses", []):
+                    if addr.get("type") == "ExternalIP" and addr.get("address"):
+                        return addr["address"], "node ExternalIP"
+            except Exception as e:
+                print(f"couldn't read node {node_name}: {e}", flush=True)
+        public_ip = aws_public_ip()
+        if public_ip:
+            return public_ip, "EC2 public IP"
+        node_ip = os.environ.get("NODE_IP", "").strip()
+        return (node_ip, "node InternalIP") if node_ip else (None, None)
+
+    _node_address = {"value": None, "source": None, "at": 0.0}
 
     def desired_ingress_host():
         fixed = os.environ.get("TRADING_HOST", "").strip()
         if fixed:
             return fixed
-        node_ip = os.environ.get("NODE_IP", "").strip()
-        if not node_ip:
+        if not _node_address["value"] or time.time() - _node_address["at"] > NODE_ADDRESS_TTL:
+            value, source = node_address()
+            if value and value != _node_address["value"]:
+                print(f"using {source} {value}", flush=True)
+            _node_address.update(value=value, source=source, at=time.time())
+        if not _node_address["value"]:
             return None
-        return f"trading.{node_ip}.{os.environ.get('WILDCARD_DNS', '').strip() or 'sslip.io'}"
+        return f"trading.{_node_address['value']}.{os.environ.get('WILDCARD_DNS', '').strip() or 'sslip.io'}"
 
     def ingress_host_loop():
         while True:
@@ -94,7 +137,7 @@ data:
                         print(f"ingress host set to {want}", flush=True)
             except Exception as e:
                 print(f"ingress host update failed: {e}", flush=True)
-            time.sleep(60)
+            time.sleep(5)
 
     def get_bot_count():
         try:
@@ -939,7 +982,11 @@ spec:
           ports:
             - containerPort: 80
           env:
-            # Used to set the Ingress host (see ingress_host_loop above).
+            # Used to set the Ingress host (see node_address/ingress_host_loop above).
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: NODE_IP
               valueFrom:
                 fieldRef:
