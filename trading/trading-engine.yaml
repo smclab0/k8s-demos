@@ -351,12 +351,18 @@ data:
             pass
 
     def portfolio_history_loop():
+        # One value series per logged-in user (every portfolio except the bot
+        # swarm's), so each user's chart shows only their own account.
         while True:
             try:
-                ensure_init()
-                value = get_portfolio()["total_value"]
-                r.rpush("history:portfolio", json.dumps([time.time(), value]))
-                r.ltrim("history:portfolio", -300, -1)
+                now = time.time()
+                for key in r.scan_iter(match="portfolio:cash:*", count=100):
+                    source = key.split(":", 2)[2]
+                    if source == "bot":
+                        continue
+                    value = get_portfolio(source)["total_value"]
+                    r.rpush(f"history:portfolio:{source}", json.dumps([now, value]))
+                    r.ltrim(f"history:portfolio:{source}", -300, -1)
             except Exception:
                 pass
             time.sleep(2)

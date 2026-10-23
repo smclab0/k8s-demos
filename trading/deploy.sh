@@ -26,6 +26,20 @@ fi
 FQDN="trading.${TRAEFIK_IP}.sslip.io"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The dashboard's shared login password lives in a Secret that is never
+# committed (this repo is public). Created once from $TRADING_PASSWORD; later
+# runs leave it alone. To change it: delete the Secret, re-run with the new
+# value, then `kubectl -n apps rollout restart deploy/trading-dashboard`.
+if ! kubectl -n apps get secret trading-users >/dev/null 2>&1; then
+  if [ -z "${TRADING_PASSWORD:-}" ]; then
+    echo "Secret apps/trading-users doesn't exist yet -- re-run as: TRADING_PASSWORD='...' trading/deploy.sh" >&2
+    exit 1
+  fi
+  kubectl get namespace apps >/dev/null 2>&1 || kubectl create namespace apps
+  printf '%s' "${TRADING_PASSWORD}" | kubectl -n apps create secret generic trading-users --from-file=password=/dev/stdin
+  kubectl -n apps label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
+fi
+
 kubectl kustomize "${DIR}" | sed "s/trading\.example\.com/${FQDN}/g" | kubectl apply -f -
 
 # The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
