@@ -413,7 +413,9 @@ data:
           const xs = points.map(p => p[0]);
           const ys = points.map(p => p[1]);
           const minX = Math.min(...xs), maxX = Math.max(...xs);
-          const minY = Math.min(...ys), maxY = Math.max(...ys);
+          let minY = Math.min(...ys), maxY = Math.max(...ys);
+          // A constant value (e.g. an all-cash portfolio) would otherwise sit on the bottom axis.
+          if (minY === maxY) { minY -= 1; maxY += 1; }
           const spanX = (maxX - minX) || 1;
           const spanY = (maxY - minY) || 1;
           const scaleX = x => padding + (x - minX) / spanX * (w - padding * 2);
@@ -438,8 +440,8 @@ data:
           svg.innerHTML = `
             <line x1="${padding}" y1="${h - padding}" x2="${w - padding}" y2="${h - padding}" style="stroke:var(--line)" stroke-width="1"/>
             <defs>
-              <linearGradient id="pf-line" x1="0" x2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#14b8a6"/></linearGradient>
-              <linearGradient id="pf-area" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#4f46e5" stop-opacity="0.22"/><stop offset="1" stop-color="#14b8a6" stop-opacity="0"/></linearGradient>
+              <linearGradient id="pf-line" gradientUnits="userSpaceOnUse" x1="${padding}" x2="${w - padding}" y1="0" y2="0"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#14b8a6"/></linearGradient>
+              <linearGradient id="pf-area" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="${padding}" y2="${h - padding}"><stop offset="0" stop-color="#4f46e5" stop-opacity="0.22"/><stop offset="1" stop-color="#14b8a6" stop-opacity="0"/></linearGradient>
             </defs>
             <path d="${area}" fill="url(#pf-area)" stroke="none"/>
             <path d="${path}" fill="none" stroke="url(#pf-line)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
