@@ -20,7 +20,7 @@ data:
     # phase) and by each hft-bot pod (order rate) -- editable via the
     # dashboard's /admin page instead of requiring a redeploy.
     CONFIG_DEFAULTS = {
-        "open_bots_per_node": 10,  # open-phase hft-bot replicas = this * live node count
+        "open_bots_per_node": 3,  # open-phase hft-bot replicas = this * live node count
         "quiet_bots": 2,
         "closed_bots": 0,
         "bot_rate": 50,
@@ -373,7 +373,7 @@ metadata:
   labels:
     app: trading-engine
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: trading-engine

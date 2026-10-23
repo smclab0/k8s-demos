@@ -134,7 +134,7 @@ spec:
                   # as the cluster grows or shrinks with no config edit needed.
                   NODE_COUNT=$(curl -sS -m 60 --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
                     "$API/api/v1/nodes" | jq '.items | length')
-                  OPEN_BOTS_PER_NODE=$(echo "$CONFIG" | jq -r '.open_bots_per_node // 10')
+                  OPEN_BOTS_PER_NODE=$(echo "$CONFIG" | jq -r '.open_bots_per_node // 3')
                   OPEN_BOTS=$(( OPEN_BOTS_PER_NODE * NODE_COUNT ))
                   QUIET_BOTS=$(echo "$CONFIG" | jq -r '.quiet_bots // 2')
                   CLOSED_BOTS=$(echo "$CONFIG" | jq -r '.closed_bots // 0')
