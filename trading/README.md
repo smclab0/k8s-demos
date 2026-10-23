@@ -39,6 +39,12 @@ kubectl delete all,cronjob,sa,role,rolebinding,configmap,secret,ingress \
 kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/part-of=stock-trading-demo
 ```
 
+## Version
+
+The dashboard footer and the login page show which version is running, e.g. `version ffe8098 · 2026-10-23`: the short hash and date of the **last git commit that touched `trading/`**, stamped in by `deploy.sh` as `APP_VERSION`/`APP_VERSION_DATE` env vars on `trading-dashboard`.
+A `-dirty` suffix means it was deployed with uncommitted changes in `trading/`; `unversioned` means it was applied without `deploy.sh` (e.g. a plain `kubectl apply -k trading/`).
+Because a new version changes the dashboard's pod template, deploying one also restarts the dashboard onto its updated ConfigMap. Other components still need a manual `rollout restart` after a ConfigMap-only change (see Deploying).
+
 ## Logins
 
 The dashboard requires a login. There are nine accounts, `user1` … `user9` (the `TRADING_USERS` env var on `trading-dashboard` in `dashboard.yaml`), sharing one password.

@@ -29,6 +29,14 @@ data:
     # their username is the engine "source", alongside the bot swarm's "bot".
     USERS = {u.strip() for u in os.environ.get("TRADING_USERS", "").split(",") if u.strip()}
     PASSWORD = os.environ.get("TRADING_PASSWORD", "")
+
+    # Stamped in by deploy.sh: the last git commit that touched trading/ (plus
+    # "-dirty" if deployed with uncommitted changes) and that commit's date.
+    # A plain `kubectl apply -k` leaves the placeholders, shown as "unversioned".
+    _version = os.environ.get("APP_VERSION", "")
+    _version_date = os.environ.get("APP_VERSION_DATE", "")
+    VERSION_LABEL = "unversioned" if not _version or _version.startswith("__") else (
+        f"version {_version}" + (f" &middot; {_version_date}" if _version_date and not _version_date.startswith("__") else ""))
     SESSION_TTL = 12 * 3600
     MAX_LOGIN_FAILS = 10  # per username, per 15 minutes
 
@@ -148,6 +156,7 @@ data:
       <form method="post" action="/login">
         <h1>Stock Trading Demo</h1>
         <p class="disclaimer">This isn't real and only intended to load test a cluster.</p>
+        <p class="disclaimer">{{version}}</p>
         {{error}}
         <label>username <input name="username" autocomplete="username" required autofocus></label>
         <label>password <input name="password" type="password" autocomplete="current-password" required></label>
@@ -790,6 +799,7 @@ data:
       <div class="footer">
         <p class="byline">by Steve McBride &middot; built by AI</p>
         <p class="disclaimer">This isn't real and only intended to load test a cluster.</p>
+        <p class="disclaimer">{{version}}</p>
       </div>
     </body>
     </html>"""
@@ -815,7 +825,7 @@ data:
 
         def _login_page(self, code, error=""):
             html = f'<p class="err">{error}</p>' if error else ""
-            self._send(code, "text/html; charset=utf-8", LOGIN_PAGE.replace("{{error}}", html).encode("utf-8"))
+            self._send(code, "text/html; charset=utf-8", LOGIN_PAGE.replace("{{error}}", html).replace("{{version}}", VERSION_LABEL).encode("utf-8"))
 
         def _session_token(self):
             morsel = SimpleCookie(self.headers.get("Cookie", "")).get("session")
@@ -914,7 +924,7 @@ data:
                 except Exception:
                     self._json(503, {"error": "trading-engine unreachable"})
                 return
-            self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
+            self._send(200, "text/html; charset=utf-8", PAGE.replace("{{version}}", VERSION_LABEL).encode("utf-8"))
 
         def do_POST(self):
             if self.path == "/login":
@@ -1006,6 +1016,13 @@ spec:
           env:
             - name: TRADING_USERS
               value: "user1,user2,user3,user4,user5,user6,user7,user8,user9"
+            # Placeholders replaced by deploy.sh with the deployed git version.
+            # A new version changes the pod template, so it also restarts the
+            # dashboard onto its updated ConfigMap.
+            - name: APP_VERSION
+              value: "__APP_VERSION__"
+            - name: APP_VERSION_DATE
+              value: "__APP_VERSION_DATE__"
             # Created by deploy.sh from $TRADING_PASSWORD -- never committed.
             - name: TRADING_PASSWORD
               valueFrom:

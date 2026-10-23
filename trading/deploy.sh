@@ -40,7 +40,19 @@ if ! kubectl -n apps get secret trading-users >/dev/null 2>&1; then
   kubectl -n apps label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
 fi
 
-kubectl kustomize "${DIR}" | sed "s/trading\.example\.com/${FQDN}/g" | kubectl apply -f -
+# Version shown on the dashboard: the last commit that touched trading/, so
+# commits elsewhere in the repo don't change it (or restart the dashboard).
+VERSION=$(git -C "${DIR}" log -1 --format=%h -- . 2>/dev/null || true)
+VERSION_DATE=$(git -C "${DIR}" log -1 --format=%cs -- . 2>/dev/null || true)
+if [ -n "${VERSION}" ] && [ -n "$(git -C "${DIR}" status --porcelain -- . 2>/dev/null)" ]; then
+  VERSION="${VERSION}-dirty"
+fi
+
+kubectl kustomize "${DIR}" \
+  | sed -e "s/trading\.example\.com/${FQDN}/g" \
+        -e "s/value: \"\{0,1\}__APP_VERSION__\"\{0,1\}$/value: \"${VERSION:-unversioned}\"/" \
+        -e "s/value: \"\{0,1\}__APP_VERSION_DATE__\"\{0,1\}$/value: \"${VERSION_DATE}\"/" \
+  | kubectl apply -f -
 
 # The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
 # dashboard showing "no session recorded yet" until then. If no market_open has
