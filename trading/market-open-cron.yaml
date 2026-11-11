@@ -60,7 +60,7 @@ metadata:
   name: market-open
   namespace: trading
 spec:
-  schedule: "*/14 * * * *"
+  schedule: "*/6 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -138,9 +138,9 @@ spec:
                   OPEN_BOTS=$(( OPEN_BOTS_PER_NODE * NODE_COUNT ))
                   QUIET_BOTS=$(echo "$CONFIG" | jq -r '.quiet_bots // 2')
                   CLOSED_BOTS=$(echo "$CONFIG" | jq -r '.closed_bots // 0')
-                  OPEN_SECS=$(( $(echo "$CONFIG" | jq -r '.open_minutes // 8') * 60 ))
-                  QUIET_SECS=$(( $(echo "$CONFIG" | jq -r '.quiet_minutes // 3') * 60 ))
-                  CLOSED_SECS=$(( $(echo "$CONFIG" | jq -r '.closed_minutes // 3') * 60 ))
+                  OPEN_SECS=$(( $(echo "$CONFIG" | jq -r '.open_minutes // 3') * 60 ))
+                  QUIET_SECS=$(( $(echo "$CONFIG" | jq -r '.quiet_minutes // 2') * 60 ))
+                  CLOSED_SECS=$(( $(echo "$CONFIG" | jq -r '.closed_minutes // 1') * 60 ))
                   echo "using config: ${NODE_COUNT} nodes, open=${OPEN_BOTS_PER_NODE}/node=${OPEN_BOTS}bots/${OPEN_SECS}s quiet=${QUIET_BOTS}bots/${QUIET_SECS}s closed=${CLOSED_BOTS}bots/${CLOSED_SECS}s"
 
                   echo "=== phase 1/3: market open, applying volatility jolt ==="

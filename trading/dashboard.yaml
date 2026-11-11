@@ -802,7 +802,7 @@ data:
               const ageSec = Date.now() / 1000 - last.epoch;
               if (last.type === 'market_close') {
                 status.textContent = ageSec < 20
-                  ? `market just closed at ${last.time} — reopens on the next 14-min cycle`
+                  ? `market just closed at ${last.time} — reopens on the next 6-min cycle`
                   : `market closed at ${last.time}`;
                 status.className = 'closed';
               } else {

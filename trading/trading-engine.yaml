@@ -24,9 +24,9 @@ data:
         "quiet_bots": 2,
         "closed_bots": 0,
         "bot_rate": 50,
-        "open_minutes": 8,
-        "quiet_minutes": 3,
-        "closed_minutes": 3,
+        "open_minutes": 3,
+        "quiet_minutes": 2,
+        "closed_minutes": 1,
     }
     CONFIG_BOUNDS = {  # (min, max) inclusive, applied on write
         "open_bots_per_node": (0, 50),

@@ -58,7 +58,7 @@ kubectl apply -k "${DIR}"
 kubectl -n trading set env deploy/trading-dashboard \
   WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}" TRADING_HOST="${TRADING_HOST:-}"
 
-# The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
+# The CronJob's first scheduled tick can be up to 6 minutes away, leaving the
 # dashboard showing "no session recorded yet" until then. If no market_open has
 # ever been recorded, start a cycle right now from the CronJob's own template;
 # it hands over to the next scheduled tick by itself (see phase_sleep in
