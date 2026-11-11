@@ -103,6 +103,18 @@ See `GET /pending?source=user` and the dashboard's "queued for next open" panel.
 The dashboard's market-status line reflects whichever of `market_open` / `market_close` happened most recently.
 `hft-bot`'s replica count set directly via `kubectl scale` (or in `hft-bot.yaml`) is only the *resting* baseline between automated cycles — the CronJob will override it on its own schedule regardless.
 
+### Virtual aide (SUSE AI)
+
+The dashboard has a chat assistant: the **ask your aide** button, bottom right. You can ask it about your portfolio, what's moving, or what to try next. It's answered by the cluster's SUSE AI stack, which is its Ollama service. With every question, the dashboard gives the model a compact snapshot of your own state: portfolio value and change since the start, cash, holdings, queued orders, the market phase, the biggest gainers and losers, and all prices. The model only answers from that snapshot. It gives advice only and can't place orders.
+
+- **Settings** (env on `trading-dashboard`):
+  - `AI_URL` defaults to `http://ollama.apps.svc.cluster.local:11434`. Set it to empty to turn the aide off.
+  - `AI_MODEL` defaults to `llama3.2:1b`. If that model isn't pulled, the aide uses the first model Ollama has.
+- **Setup:** pull the model into Ollama once: `curl http://<ollama>:11434/api/pull -d '{"model":"llama3.2:1b"}'`. It's about 1.3 GB.
+- **Speed:** replies stream in as they're written, and a typical answer takes 2–10 s on CPU.
+- **One question at a time:** Ollama answers one request at a time (`AI_SLOTS`, default 1). Later questions wait up to 20 s, then get "the aide is helping someone else".
+- **API:** `GET /api/aide` returns the model in use. `POST /api/aide {"messages":[{"role":"user","content":"..."}]}` streams back the reply as plain text. Both need a login, and only the last 8 turns, of up to 1000 characters each, are sent to the model.
+
 ### Live-tunable settings
 
 The bot counts per phase (`open_bots_per_node`=3, `quiet_bots`=2, `closed_bots`=0), phase durations (60/30/30 s), and the per-bot order rate (50/sec) are all defaults, not fixed — tune them live, no redeploy needed, via `POST /config` on `trading-engine` directly (or the dashboard's `POST /api/config`, which just proxies it).

@@ -217,6 +217,119 @@ data:
         except (urllib.error.URLError, socket.timeout, TimeoutError):
             return 503, {"error": "trading-engine is busy, try again"}
 
+    # Virtual aide: a chat assistant answered by the cluster's SUSE AI stack
+    # (its Ollama service), primed with the signed-in user's own portfolio and
+    # the live market. It only gives advice -- it can't place orders.
+    AI_URL = os.environ.get("AI_URL", "").rstrip("/")
+    AI_MODEL = os.environ.get("AI_MODEL", "")
+    AI_SLOTS = threading.BoundedSemaphore(int(os.environ.get("AI_SLOTS", "1")))
+    _ai_model_cache = {"name": None, "checked": 0}
+
+    def ai_model():
+        """The configured model if Ollama has it, else the first installed one."""
+        if not AI_URL:
+            return None
+        now = time.time()
+        if now - _ai_model_cache["checked"] < 60:
+            return _ai_model_cache["name"]
+        name = None
+        try:
+            with urllib.request.urlopen(f"{AI_URL}/api/tags", timeout=3) as resp:
+                models = [m["name"] for m in json.load(resp).get("models", [])]
+            if AI_MODEL in models or f"{AI_MODEL}:latest" in models:
+                name = AI_MODEL
+            elif models:
+                name = models[0]
+        except Exception:
+            name = None
+        _ai_model_cache.update(name=name, checked=now)
+        return name
+
+    def market_phase(events, cfg):
+        last = next((e for e in events if e.get("type") in ("market_open", "market_close")), None)
+        if not last:
+            return "not started yet"
+        if last["type"] == "market_close":
+            return "closed (orders queue until the next open)"
+        elapsed = time.time() - last.get("epoch", 0)
+        if elapsed < cfg.get("open_seconds", 60):
+            return "open, busy (the bot swarm is trading hard)"
+        return "open, quiet (fewer bots trading)"
+
+    def aide_context(user):
+        """A compact snapshot of the user's world for the system prompt."""
+        try:
+            pf = engine_get(f"/portfolio?source={user}", timeout=2)
+        except Exception:
+            pf = {"cash": 0, "positions": {}, "total_value": 0}
+        try:
+            events = engine_get("/events", timeout=2)
+        except Exception:
+            events = []
+        try:
+            cfg = engine_get("/config", timeout=2)
+        except Exception:
+            cfg = {}
+        moves = []
+        try:
+            symbols = sorted(r.hkeys("prices"))
+            pipe = r.pipeline()
+            for sym in symbols:
+                pipe.lrange(f"history:{sym}", -60, -1)
+            for sym, raw in zip(symbols, pipe.execute()):
+                pts = [json.loads(x)[1] for x in raw]
+                if len(pts) >= 2 and pts[0]:
+                    moves.append((sym, pts[-1], (pts[-1] - pts[0]) / pts[0] * 100))
+        except Exception:
+            pass
+        held = [f"{s}: {p['qty']:g} shares at §{p['price']:,.2f}, worth §{p['market_value']:,.2f}"
+                for s, p in pf.get("positions", {}).items() if p.get("qty")]
+        movers = sorted(moves, key=lambda m: m[2])
+        fmt_m = lambda ms: ", ".join(f"{s} {c:+.1f}%" for s, p, c in ms) or "n/a"
+        pending = []
+        try:
+            pending = [f"{o.get('side')} {o.get('qty')} {o.get('symbol')}"
+                       for o in engine_get(f"/pending?source={user}", timeout=2)]
+        except Exception:
+            pass
+        total = pf.get("total_value", 0)
+        change = total - 100000
+        return "\n".join([
+            f"Trader: {user}.",
+            f"Portfolio: worth §{total:,.2f} now, started at §100,000.00, so "
+            f"{'UP' if change >= 0 else 'DOWN'} §{abs(change):,.2f} ({change / 1000:+.2f}%). "
+            f"Cash available: §{pf.get('cash', 0):,.2f}.",
+            "Holdings: " + ("; ".join(held) or "none"),
+            "Orders queued for next open: " + (", ".join(pending) or "none"),
+            f"Market: {market_phase(events, cfg)}. One cycle is open {cfg.get('open_seconds', 60)}s, "
+            f"quiet {cfg.get('quiet_seconds', 30)}s, closed {cfg.get('closed_seconds', 30)}s; "
+            "each open starts with a random volatility jolt.",
+            "Biggest gainers (last ~2 min): " + fmt_m(movers[::-1][:5]),
+            "Biggest losers (last ~2 min): " + fmt_m(movers[:5]),
+            "Prices: " + ", ".join(f"{s} §{p:,.2f}" for s, p, _ in moves),
+        ])
+
+    AIDE_PROMPT = """You are the virtual aide in a demo stock-trading app. The market is
+    entirely fake: random-walk prices and a swarm of bots load-testing a Kubernetes
+    cluster, so nothing here is real money or real financial advice. Help the trader
+    understand their portfolio, the market phase and the tickers, and suggest ideas
+    they could try with the buy/sell buttons. You cannot place orders yourself.
+    If asked to buy or sell, say they can do it in the "place order" panel.
+    Answer in 2-4 short sentences. Never list all the prices unless asked.
+    The currency is § (not $). Quote numbers exactly as written below; if something isn't there, say you don't know.
+
+    Live data:
+    """
+
+    def clean_messages(raw):
+        """Last few user/assistant turns from the browser, bounded in size."""
+        out = []
+        for m in raw if isinstance(raw, list) else []:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
+                out.append({"role": m["role"], "content": m["content"][:1000]})
+        out = out[-8:]
+        return out if out and out[-1]["role"] == "user" else None
+
     LOGIN_PAGE = """<html>
     <head>
     <meta charset="utf-8">
@@ -410,6 +523,36 @@ data:
       .filter-btn { width:auto; padding:5px 14px; font-size:13px; border-radius:9px; background:none; color:var(--muted); }
       .filter-btn.active { background:var(--panel); color:var(--ink); box-shadow:var(--shadow); }
       .footer { max-width:1200px; margin: 28px auto 0; padding-top:16px; border-top:1px solid var(--line); }
+
+      /* virtual aide: a launcher button and a chat panel, bottom right */
+      .aide-launch { position:fixed; right:20px; bottom:20px; z-index:30; width:auto; display:flex; align-items:center; gap:8px;
+                     padding:12px 18px 12px 14px; border-radius:99px; background:var(--grad); color:#fff; box-shadow:0 8px 24px #4f46e555; }
+      .aide-launch i { width:24px; height:24px; border-radius:50%; background:#ffffff33; display:grid; place-items:center; font-style:normal; font-size:13px; }
+      .aide-panel { position:fixed; right:20px; bottom:20px; z-index:31; width:min(380px, calc(100vw - 32px)); height:min(560px, calc(100vh - 40px));
+                    display:none; flex-direction:column; background:var(--panel); border:1px solid var(--line); border-radius:22px; box-shadow:0 20px 60px #0f163040; overflow:hidden; }
+      .aide-panel.open { display:flex; }
+      .aide-head { display:flex; align-items:center; gap:10px; padding:14px 14px 12px 16px; color:#fff;
+                   background: radial-gradient(circle at 90% 0%, #14b8a6aa, transparent 55%), linear-gradient(135deg, #1e1b4b, #312e81 60%, #0f766e); }
+      .aide-head h2 { color:#fff; margin:0; font-size:16px; }
+      .aide-head p { margin:0; font-size:12px; opacity:.75; }
+      .aide-head .grow { flex:1; min-width:0; }
+      .aide-head button { width:34px; height:34px; padding:0; border-radius:50%; background:#ffffff22; color:#fff; font-size:18px; line-height:1; }
+      .aide-log { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+      .aide-msg { max-width:88%; padding:9px 13px; border-radius:16px; font-size:14px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+      .aide-msg.assistant { align-self:flex-start; background:var(--soft); border-bottom-left-radius:5px; }
+      .aide-msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:5px; }
+      .aide-msg.error { align-self:center; background:none; color:var(--danger); font-size:13px; text-align:center; }
+      .aide-msg.thinking { color:var(--muted); font-style:italic; }
+      .aide-chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 14px 10px; }
+      .aide-chips button { width:auto; padding:6px 11px; font-size:12px; border-radius:99px; background:var(--brand-soft); color:var(--brand); font-weight:650; }
+      .aide-form { display:flex; gap:8px; padding:10px 12px 12px; border-top:1px solid var(--line); margin:0; flex-wrap:nowrap; }
+      .aide-form input { flex:1; min-width:0; }
+      .aide-form button { width:auto; background:var(--brand); color:#fff; }
+      .aide-note { margin:0; padding:0 14px 10px; font-size:11px; color:var(--faint); }
+      @media (max-width: 600px) {
+        .aide-panel { right:16px; bottom:16px; height:calc(100vh - 32px); }
+        .aide-launch { right:16px; bottom:16px; }
+      }
     </style>
     </head>
     <body>
@@ -508,6 +651,29 @@ data:
           </div>
         </aside>
       </div>
+
+      <button class="aide-launch" id="aide-launch" type="button" aria-controls="aide-panel" aria-expanded="false"><i>&#10022;</i>ask your aide</button>
+      <section class="aide-panel" id="aide-panel" aria-label="virtual aide">
+        <div class="aide-head">
+          <div class="grow">
+            <h2>Virtual aide</h2>
+            <p id="aide-model">powered by SUSE AI</p>
+          </div>
+          <button type="button" id="aide-close" aria-label="close">&times;</button>
+        </div>
+        <div class="aide-log" id="aide-log" aria-live="polite"></div>
+        <div class="aide-chips" id="aide-chips">
+          <button type="button">How is my portfolio doing?</button>
+          <button type="button">What's moving right now?</button>
+          <button type="button">What could I try next?</button>
+          <button type="button">Explain the market phases</button>
+        </div>
+        <form class="aide-form" id="aide-form">
+          <input id="aide-input" maxlength="500" placeholder="Ask about your portfolio or the market" autocomplete="off">
+          <button type="submit" id="aide-send">send</button>
+        </form>
+        <p class="aide-note">Fake market, not financial advice. The aide can't place orders.</p>
+      </section>
       <script>
         let lastSymbols = null;
         let lastTrades = [];
@@ -954,6 +1120,94 @@ data:
 
         refreshCycleConfig();
         setInterval(refreshCycleConfig, 10000);
+
+        // ---- virtual aide (answers stream in from SUSE AI via /api/aide) ----
+        const aide = {
+          panel: document.getElementById('aide-panel'),
+          launch: document.getElementById('aide-launch'),
+          log: document.getElementById('aide-log'),
+          form: document.getElementById('aide-form'),
+          input: document.getElementById('aide-input'),
+          send: document.getElementById('aide-send'),
+          chips: document.getElementById('aide-chips'),
+          history: [],
+          busy: false,
+        };
+
+        function aideBubble(role, text) {
+          const div = document.createElement('div');
+          div.className = 'aide-msg ' + role;
+          div.textContent = text;
+          aide.log.appendChild(div);
+          aide.log.scrollTop = aide.log.scrollHeight;
+          return div;
+        }
+
+        function aideOpen(open) {
+          aide.panel.classList.toggle('open', open);
+          aide.launch.style.display = open ? 'none' : '';
+          aide.launch.setAttribute('aria-expanded', String(open));
+          if (!open) return;
+          if (!aide.log.children.length) {
+            const name = CURRENT_USER ? ', ' + CURRENT_USER : '';
+            aideBubble('assistant', 'Hi' + name + ' - I can see your portfolio and the live market. What would you like to know?');
+          }
+          aide.input.focus();
+          fetch('/api/aide', {cache: 'no-store'}).then(r => r.json()).then(s => {
+            document.getElementById('aide-model').textContent =
+              s.model ? 'powered by SUSE AI · ' + s.model : 'SUSE AI is offline right now';
+          }).catch(() => {});
+        }
+
+        async function aideAsk(question) {
+          question = question.trim();
+          if (!question || aide.busy) return;
+          aide.busy = true;
+          aide.send.disabled = true;
+          aide.chips.style.display = 'none';
+          aide.input.value = '';
+          aideBubble('user', question);
+          aide.history.push({role: 'user', content: question});
+          const reply = aideBubble('assistant thinking', 'thinking…');
+          let text = '';
+          try {
+            const resp = await fetch('/api/aide', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({messages: aide.history.slice(-8)}),
+            });
+            if (!resp.ok) {
+              let err = 'the aide is unavailable';
+              try { err = (await resp.json()).error || err; } catch (e) {}
+              throw new Error(err);
+            }
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            for (;;) {
+              const {done, value} = await reader.read();
+              if (done) break;
+              text += decoder.decode(value, {stream: true});
+              reply.classList.remove('thinking');
+              reply.textContent = text;
+              aide.log.scrollTop = aide.log.scrollHeight;
+            }
+            if (!text.trim()) throw new Error('the aide had nothing to say - try rephrasing');
+            aide.history.push({role: 'assistant', content: text});
+          } catch (e) {
+            reply.remove();
+            aide.history.pop();
+            aideBubble('error', e.message || 'the aide is unavailable');
+          } finally {
+            aide.busy = false;
+            aide.send.disabled = false;
+            aide.input.focus();
+          }
+        }
+
+        aide.launch.addEventListener('click', () => aideOpen(true));
+        document.getElementById('aide-close').addEventListener('click', () => aideOpen(false));
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && aide.panel.classList.contains('open')) aideOpen(false); });
+        aide.form.addEventListener('submit', e => { e.preventDefault(); aideAsk(aide.input.value); });
+        aide.chips.querySelectorAll('button').forEach(b => b.addEventListener('click', () => aideAsk(b.textContent)));
       </script>
       <div class="footer">
         <p class="byline">by Steve McBride &middot; built by AI</p>
@@ -1082,7 +1336,69 @@ data:
                 except Exception:
                     self._json(503, {"error": "trading-engine unreachable"})
                 return
+            if path == "/api/aide":
+                self._json(200, {"model": ai_model()})
+                return
             self._send(200, "text/html; charset=utf-8", PAGE.encode("utf-8"))
+
+        def _aide(self, user):
+            """Streams the model's reply to the browser as plain text."""
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                messages = clean_messages(json.loads(self.rfile.read(min(length, 65536))).get("messages"))
+            except Exception:
+                messages = None
+            if not messages:
+                self._json(400, {"error": "invalid request body"})
+                return
+            model = ai_model()
+            if not model:
+                self._json(503, {"error": "the aide is offline (SUSE AI not reachable)"})
+                return
+            # Ollama here is CPU-only and serves one request at a time, so queue
+            # briefly rather than piling requests onto it.
+            if not AI_SLOTS.acquire(timeout=20):
+                self._json(429, {"error": "the aide is helping someone else -- try again in a moment"})
+                return
+            try:
+                body = json.dumps({
+                    "model": model, "stream": True,
+                    "messages": [{"role": "system", "content": AIDE_PROMPT + aide_context(user)}] + messages,
+                    "options": {"num_predict": 300, "temperature": 0.4},
+                }).encode()
+                req = urllib.request.Request(f"{AI_URL}/api/chat", data=body,
+                                             headers={"Content-Type": "application/json"}, method="POST")
+                try:
+                    resp = urllib.request.urlopen(req, timeout=120)
+                except Exception:
+                    self._json(503, {"error": "the aide is offline (SUSE AI not reachable)"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Aide-Model", model)
+                self.end_headers()  # no Content-Length: the reply ends when the connection closes
+                with resp:
+                    for line in resp:
+                        try:
+                            chunk = json.loads(line)
+                        except ValueError:
+                            continue
+                        text = chunk.get("message", {}).get("content", "")
+                        if text:
+                            self.wfile.write(text.encode("utf-8"))
+                            self.wfile.flush()
+                        if chunk.get("done"):
+                            break
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # the user closed the panel or the page
+            except Exception:
+                try:
+                    self.wfile.write("\n[the aide lost its connection to SUSE AI]".encode("utf-8"))
+                except Exception:
+                    pass
+            finally:
+                AI_SLOTS.release()
 
         def do_POST(self):
             if self.path == "/login":
@@ -1112,6 +1428,9 @@ data:
             user = self._user()
             if not user:
                 self._json(401, {"error": "not logged in"})
+                return
+            if self.path == "/api/aide":
+                self._aide(user)
                 return
             if self.path == "/reset":
                 status, resp = engine_post("/reset", {"source": user})
@@ -1195,6 +1514,12 @@ spec:
                 secretKeyRef:
                   name: trading-users
                   key: password
+            # Virtual aide: the SUSE AI Ollama service. Empty AI_URL turns it off.
+            # AI_MODEL falls back to the first installed model if it isn't pulled.
+            - name: AI_URL
+              value: "http://ollama.apps.svc.cluster.local:11434"
+            - name: AI_MODEL
+              value: "llama3.2:1b"
           resources:
             requests:
               cpu: 50m
