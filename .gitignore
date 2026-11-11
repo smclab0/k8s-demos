@@ -1,1 +1,3 @@
 /overlays/local/
+# Cluster backups contain Secrets (credentials, TLS keys) -- never commit them; this repo is public.
+/backups/
