@@ -16,6 +16,30 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Shared with other apps, so not part of the manifests (see kustomization.yaml).
+kubectl get namespace apps >/dev/null 2>&1 || kubectl create namespace apps
+
+# Ingress controller. Clusters that ship traefik (rke2, k3s) are left alone.
+# Anywhere else (e.g. EKS), install traefik from traefik-values.yaml: a
+# DaemonSet on every node's :80/:443, which the dashboard's node-address
+# Ingress host relies on. Once installed here, later runs keep it in sync.
+TRAEFIK_CHART_VERSION=41.7.1
+traefik_helm() {
+  command -v helm >/dev/null 2>&1 || {
+    echo "This cluster has no traefik IngressClass and helm isn't installed -- install helm (https://helm.sh) and re-run" >&2
+    exit 1
+  }
+  helm upgrade --install traefik traefik --repo https://traefik.github.io/charts \
+    --version "${TRAEFIK_CHART_VERSION}" -n traefik --create-namespace \
+    -f "${DIR}/traefik-values.yaml" --wait --timeout 5m
+}
+if command -v helm >/dev/null 2>&1 && helm status traefik -n traefik >/dev/null 2>&1; then
+  traefik_helm
+elif ! kubectl get ingressclass traefik >/dev/null 2>&1; then
+  echo "No traefik IngressClass on this cluster -- installing traefik (chart ${TRAEFIK_CHART_VERSION})"
+  traefik_helm
+fi
+
 # The dashboard's shared login password lives in a Secret that is never
 # committed (this repo is public). Created once from $TRADING_PASSWORD; later
 # runs leave it alone. To change it: delete the Secret, re-run with the new
@@ -25,7 +49,6 @@ if ! kubectl -n apps get secret trading-users >/dev/null 2>&1; then
     echo "Secret apps/trading-users doesn't exist yet -- re-run as: TRADING_PASSWORD='...' trading/deploy.sh" >&2
     exit 1
   fi
-  kubectl get namespace apps >/dev/null 2>&1 || kubectl create namespace apps
   printf '%s' "${TRADING_PASSWORD}" | kubectl -n apps create secret generic trading-users --from-file=password=/dev/stdin
   kubectl -n apps label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
 fi

@@ -1,0 +1,26 @@
+# Settings for deploying this directory with Rancher Fleet (continuous
+# delivery). Fleet renders kustomization.yaml and installs it as a Helm release.
+
+# Creates `apps` if it's missing. The bundle itself doesn't declare the
+# namespace: it's shared with other apps, and Helm won't adopt one it didn't create.
+defaultNamespace: apps
+
+# Fields the app changes on purpose at runtime -- don't report them as drift.
+diff:
+  comparePatches:
+    # The dashboard sets its own Ingress host from its node's address
+    # (ingress_host_loop in dashboard.yaml).
+    - apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      name: trading-dashboard
+      namespace: apps
+      jsonPointers:
+        - /spec/rules/0/host
+        - /spec/tls/0/hosts/0
+    # The market-open CronJob scales the bot swarm each phase.
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: hft-bot
+      namespace: apps
+      jsonPointers:
+        - /spec/replicas

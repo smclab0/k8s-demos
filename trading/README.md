@@ -12,7 +12,7 @@ Switched to `traefik` instead, which works correctly.
 
 ## Deploying
 
-Everything here is one Kustomize app — 27 resources (the `apps` Namespace, ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob). Deploy or update with:
+Everything here is one Kustomize app — 26 resources (ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob, the Ingress) in the `apps` namespace. The namespace itself isn't part of the app, because it's shared with other apps: `deploy.sh` creates it if it's missing, and Fleet does via `fleet.yaml`. Deploy or update with:
 
 ```
 TRADING_PASSWORD='...' trading/deploy.sh   # first run only -- creates the login Secret
@@ -24,6 +24,9 @@ This is the normal way to deploy. It applies `trading/`, starts a first market c
 Two alternatives, if you don't want that:
 
 - Change the hostname with environment variables instead of editing files: `WILDCARD_DNS=nip.io trading/deploy.sh` swaps the wildcard-DNS domain (default `sslip.io`), and `TRADING_HOST=trading.smclab.net trading/deploy.sh` pins a fixed hostname instead of the node IP (you create its DNS record). `deploy.sh` passes both to the dashboard as env vars on every run, so leaving one out returns it to its default.
+- **Ingress controller:** `deploy.sh` uses the cluster's own `traefik` IngressClass if it has one (rke2 and k3s ship it — lenny's comes from rke2). If it doesn't (e.g. EKS), `deploy.sh` installs traefik with Helm (chart pinned in `deploy.sh`, values in `traefik-values.yaml`) into the `traefik` namespace: a DaemonSet listening on every node's `:80`/`:443` via `hostPort`, which is what the node-address sslip.io host needs, and **no Service, so no cloud load balancer is created**. Later runs keep that release in sync; a cluster's own traefik is never touched. Needs `helm` on the machine running `deploy.sh`, and on a cloud the nodes' security group must allow inbound `:80`/`:443`.
+  TLS: `ingress.yaml` asks cert-manager for a cert from `lenny-internal-ca-issuer`, which only exists on lenny — elsewhere traefik serves its default self-signed certificate (a browser warning, but it works).
+- **Rancher Fleet:** point a GitRepo at this repo with path `trading`. Fleet renders `kustomization.yaml` as a Helm release; `fleet.yaml` sets the target namespace and tells Fleet to ignore the two fields the app changes on purpose (the Ingress host the dashboard sets, and `hft-bot`'s replica count set by the market CronJob). Fleet doesn't run `deploy.sh`, so on the target cluster you must **create the `trading-users` Secret yourself first** (see Logins) — until it exists the dashboard pod waits in `CreateContainerConfigError` — and the cluster needs its own traefik (or install it with `traefik-values.yaml`). Helm also won't adopt objects it didn't create, so delete anything left over from an earlier `deploy.sh` run on that cluster before Fleet's first install.
 - `kubectl apply -k trading/` works too — the dashboard sets the host the same way; you just have to look the URL up yourself.
 - To pin a fixed hostname instead of letting it track the live IP, use the local, gitignored overlay (`overlays/local/`); create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`), then `kubectl apply -k overlays/local/`.
 

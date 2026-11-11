@@ -1,0 +1,38 @@
+# Helm values for the traefik that deploy.sh installs when the cluster has no
+# `traefik` IngressClass (e.g. a bare EKS or kubeadm cluster). Not used on
+# clusters that ship their own, like rke2/k3s.
+#
+# It matches what the dashboard's self-set Ingress host assumes: traefik on
+# every node, listening on the node's own :80/:443 (hostPort), so
+# trading.<any node's address>.sslip.io reaches it. No Service, so no cloud
+# load balancer gets created (or billed).
+deployment:
+  kind: DaemonSet
+
+# Two pods can't hold the same hostPort on one node, so roll a node's pod
+# down before starting its replacement instead of surging.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
+
+service:
+  enabled: false
+
+ingressClass:
+  enabled: true
+  name: traefik
+  isDefaultClass: false
+
+providers:
+  kubernetesIngress:
+    # There's no Service to publish into Ingress status.
+    publishedService:
+      enabled: false
