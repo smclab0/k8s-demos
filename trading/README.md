@@ -4,7 +4,7 @@ Built by AI.
 **This isn't real and is only intended to load test the cluster** — fictitious tickers, fictitious currency (`§`), fictitious money.
 No hostname or IP is baked into the code: the checked-in Ingress (`ingress.yaml`) only has a placeholder, `trading.node-ip.sslip.io`, and once running the **dashboard pod sets its own Ingress host** to `trading.<its node's address>.sslip.io` (see `node_address`/`ingress_host_loop` in `dashboard.yaml`, allowed by the `trading-dashboard-set-ingress-host` Role, which can only `get`/`patch` that one Ingress).
 The address is the first of: the node's `ExternalIP` (set on EKS and most managed clouds) → the EC2 public IP from instance metadata (self-managed k3s/rke2 on AWS usually don't record an `ExternalIP`) → the node's `InternalIP` (right on-prem, e.g. lenny). The dashboard logs which one it used (`using node ExternalIP …`). On a cloud, the nodes' security group/firewall must allow inbound `:80`/`:443`. It re-checks every 5 seconds, because every `kubectl apply` (including `deploy.sh`) resets the host to the placeholder — so a redeploy means a few seconds where the site is unreachable until it's put back.
-So it works on whatever cluster and node it's deployed to — however it's deployed. The catch: the URL follows the pod, so it changes if the dashboard is rescheduled onto another node (`deploy.sh` prints the current one; or `kubectl -n apps get ingress trading-dashboard`).
+So it works on whatever cluster and node it's deployed to — however it's deployed. The catch: the URL follows the pod, so it changes if the dashboard is rescheduled onto another node (`deploy.sh` prints the current one; or `kubectl -n trading get ingress trading-dashboard`).
 traefik runs as a DaemonSet listening on every node's `:80`/`:443` (`hostPort`), which is why any node's IP reaches it.
 The dashboard is a `ClusterIP` Service, reachable only through the cluster's `traefik` ingress (`ingress.yaml`), using sslip.io's wildcard DNS (`<name>.<ip>.sslip.io` resolves to `<ip>`) so no real DNS entry is needed, with a cert from the cluster's internal CA (`lenny-internal-ca-issuer`) — the same pattern every other app here uses, since public ACME (Let's Encrypt) can't validate a hostname that resolves to a private address.
 **Note:** the `caddy` ingress class was tried first per an earlier request, but this cluster's `caddy-ingress-controller` (v0.2.1) has a real bug/limitation — it never serves a manually-supplied (cert-manager) TLS secret, failing the handshake with "no certificate available" for the SNI even with a valid secret in place, and exposes no annotation to disable its automatic HTTPS-redirect to work around it.
@@ -12,7 +12,7 @@ Switched to `traefik` instead, which works correctly.
 
 ## Deploying
 
-Everything here is one Kustomize app — 26 resources (ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob, the Ingress) in the `apps` namespace. The namespace itself isn't part of the app, because it's shared with other apps: `deploy.sh` creates it if it's missing, and Fleet does via `fleet.yaml`. Deploy or update with:
+Everything here is one Kustomize app — 26 resources (ServiceAccounts, RBAC, ConfigMaps, Services, Deployments, the CronJob, the Ingress) in the `trading` namespace. The namespace itself isn't part of the app, because Helm (which Fleet uses) won't adopt one that already exists: `deploy.sh` creates it if it's missing, and Fleet does via `fleet.yaml`. Deploy or update with:
 
 ```
 TRADING_PASSWORD='...' trading/deploy.sh   # first run only -- creates the login Secret
@@ -31,17 +31,17 @@ Two alternatives, if you don't want that:
 - To pin a fixed hostname instead of letting it track the live IP, use the local, gitignored overlay (`overlays/local/`); create it yourself first (see `overlays/local/kustomization.yaml`'s pattern: a `resources: [../../trading]` Kustomization with a patch for the Ingress's `host`/`tls.hosts`), then `kubectl apply -k overlays/local/`.
 
 It's safe to re-run any time — `kubectl apply` is idempotent, and none of the Deployments' pod templates or selectors are touched by re-applying, so a re-apply after only editing one file (e.g. `dashboard.yaml`) won't restart unrelated components.
-Note: editing a ConfigMap's content and re-applying does **not** by itself restart the pod that mounts it (Kubernetes doesn't hot-reload mounted ConfigMaps into a running process here) — follow up with `kubectl rollout restart deployment/<name> -n apps` for whichever component's script changed.
+Note: editing a ConfigMap's content and re-applying does **not** by itself restart the pod that mounts it (Kubernetes doesn't hot-reload mounted ConfigMaps into a running process here) — follow up with `kubectl rollout restart deployment/<name> -n trading` for whichever component's script changed.
 Recommend a `--dry-run=server` first for anything beyond a routine edit, to catch immutable-field conflicts before they hit the live cluster.
 
 Every resource carries the label `app.kubernetes.io/part-of=stock-trading-demo`, so the whole app can be queried (or torn down) as one unit:
 
 ```
 kubectl get all,cronjob,sa,role,rolebinding,clusterrole,clusterrolebinding \
-  -l app.kubernetes.io/part-of=stock-trading-demo -n apps
+  -l app.kubernetes.io/part-of=stock-trading-demo -n trading
 
 kubectl delete all,cronjob,sa,role,rolebinding,configmap,secret,ingress \
-  -l app.kubernetes.io/part-of=stock-trading-demo -n apps
+  -l app.kubernetes.io/part-of=stock-trading-demo -n trading
 # ClusterRole/ClusterRoleBinding aren't namespaced -- delete those separately if tearing down for good:
 kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/part-of=stock-trading-demo
 ```
@@ -50,7 +50,7 @@ kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/part-of=stock
 
 The dashboard requires a login. There are nine accounts, `user1` … `user9` (the `TRADING_USERS` env var on `trading-dashboard` in `dashboard.yaml`), sharing one password.
 **The password is never committed — this repo is public.** It lives in the `trading-users` Secret, which `deploy.sh` creates from `$TRADING_PASSWORD` the first time it runs (and refuses to deploy without, if the Secret doesn't exist yet); later runs leave it alone.
-To change it: `kubectl -n apps delete secret trading-users`, re-run `TRADING_PASSWORD='<new>' trading/deploy.sh`, then `kubectl -n apps rollout restart deploy/trading-dashboard` (the password is read into an env var at pod start).
+To change it: `kubectl -n trading delete secret trading-users`, re-run `TRADING_PASSWORD='<new>' trading/deploy.sh`, then `kubectl -n trading rollout restart deploy/trading-dashboard` (the password is read into an env var at pod start).
 
 - Each user has **their own portfolio** — their username is the engine `source` (alongside the bot swarm's `bot`), so `portfolio:cash:user3`, `trades:user3`, `history:portfolio:user3` and so on. "Mine" in the trade list, the portfolio chart, pending orders and "reset my portfolio" are all per user.
 - Sessions are random tokens in Redis (`session:<token>`, 12h TTL) behind an `HttpOnly`, `SameSite=Lax` cookie (`Secure` when traefik reports https).
@@ -109,8 +109,8 @@ The bot counts per phase (`open_bots_per_node`=3, `quiet_bots`=2, `closed_bots`=
 There used to be an `/admin` page for this; it was removed as unnecessary — the same values are just as easy to read/set with `curl`:
 
 ```
-curl -sS http://trading-engine.apps.svc.cluster.local/config
-curl -sS -X POST http://trading-engine.apps.svc.cluster.local/config \
+curl -sS http://trading-engine.trading.svc.cluster.local/config
+curl -sS -X POST http://trading-engine.trading.svc.cluster.local/config \
   -d '{"bot_rate": 3, "open_bots_per_node": 5, "quiet_bots": 10}'
 ```
 
@@ -167,17 +167,17 @@ The live-tuned settings at the time of writing (50 open-phase bots × 3 orders/s
 
 ```
 # stop the bot swarm (note: the market-open CronJob will override this on its own schedule)
-kubectl scale deployment/hft-bot -n apps --replicas=0
+kubectl scale deployment/hft-bot -n trading --replicas=0
 
 # resume it at the baseline
-kubectl scale deployment/hft-bot -n apps --replicas=2
+kubectl scale deployment/hft-bot -n trading --replicas=2
 
 # manually run a full open/quiet/closed market cycle right now (normally every 14 min)
-kubectl create job market-open-manual --from=cronjob/market-open -n apps
+kubectl create job market-open-manual --from=cronjob/market-open -n trading
 
 # reset just your own portfolio (cash/positions/trade history) -- same as the dashboard button
 curl -sS -X POST https://trading.<node-ip>.sslip.io/reset
 
 # wipe ALL trading state for everyone (prices, both portfolios, trades, events, history)
-kubectl exec -n apps deploy/redis -- redis-cli FLUSHALL
+kubectl exec -n trading deploy/redis -- redis-cli FLUSHALL
 ```

@@ -1,9 +1,9 @@
 # Settings for deploying this directory with Rancher Fleet (continuous
 # delivery). Fleet renders kustomization.yaml and installs it as a Helm release.
 
-# Creates `apps` if it's missing. The bundle itself doesn't declare the
-# namespace: it's shared with other apps, and Helm won't adopt one it didn't create.
-defaultNamespace: apps
+# Fleet creates `trading` if it's missing. The bundle itself doesn't declare the
+# namespace, because Helm won't adopt one that already exists.
+defaultNamespace: trading
 
 # Fields the app changes on purpose at runtime -- don't report them as drift.
 diff:
@@ -13,7 +13,7 @@ diff:
     - apiVersion: networking.k8s.io/v1
       kind: Ingress
       name: trading-dashboard
-      namespace: apps
+      namespace: trading
       jsonPointers:
         - /spec/rules/0/host
         - /spec/tls/0/hosts/0
@@ -21,6 +21,6 @@ diff:
     - apiVersion: apps/v1
       kind: Deployment
       name: hft-bot
-      namespace: apps
+      namespace: trading
       jsonPointers:
         - /spec/replicas

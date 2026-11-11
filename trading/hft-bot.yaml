@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: hft-bot-script
-  namespace: apps
+  namespace: trading
 data:
   bot.py: |
     import http.client
@@ -12,7 +12,7 @@ data:
     import string
     import time
 
-    ENGINE_HOST = "trading-engine.apps.svc.cluster.local"
+    ENGINE_HOST = "trading-engine.trading.svc.cluster.local"
     ENGINE_PORT = 80
     SYMBOLS = [f"{c}{c}{c}" for c in string.ascii_uppercase]
     BOT_ID = os.environ.get("HOSTNAME", "bot")
@@ -108,7 +108,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hft-bot
-  namespace: apps
+  namespace: trading
   labels:
     app: hft-bot
 spec:

@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: trading-dashboard-script
-  namespace: apps
+  namespace: trading
 data:
   dashboard.py: |
     import hmac
@@ -20,9 +20,9 @@ data:
     from http.cookies import SimpleCookie
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True,
+    r = redis.Redis(host="redis.trading.svc.cluster.local", port=6379, decode_responses=True,
                      socket_timeout=2, socket_connect_timeout=2)
-    ENGINE = "http://trading-engine.apps.svc.cluster.local"
+    ENGINE = "http://trading-engine.trading.svc.cluster.local"
 
     # Logins: a fixed list of usernames sharing one password. The password comes
     # from the trading-users Secret, which deploy.sh creates and which is never
@@ -51,7 +51,7 @@ data:
 
     K8S_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
     K8S_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-    K8S_NAMESPACE = "apps"
+    K8S_NAMESPACE = "trading"
 
     # Every order (accepted or rejected) runs the ORDER_SCRIPT via EVALSHA, so its
     # call-count delta between polls is a direct measure of order throughput.
@@ -1153,7 +1153,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trading-dashboard
-  namespace: apps
+  namespace: trading
   labels:
     app: trading-dashboard
 spec:
@@ -1214,7 +1214,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: trading-dashboard
-  namespace: apps
+  namespace: trading
 spec:
   type: ClusterIP
   selector:

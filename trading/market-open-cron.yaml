@@ -2,13 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: market-open
-  namespace: apps
+  namespace: trading
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: market-open-scaler
-  namespace: apps
+  namespace: trading
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
@@ -19,11 +19,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: market-open-scaler
-  namespace: apps
+  namespace: trading
 subjects:
   - kind: ServiceAccount
     name: market-open
-    namespace: apps
+    namespace: trading
 roleRef:
   kind: Role
   name: market-open-scaler
@@ -48,7 +48,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: market-open
-    namespace: apps
+    namespace: trading
 roleRef:
   kind: ClusterRole
   name: market-open-read-nodes
@@ -58,7 +58,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: market-open
-  namespace: apps
+  namespace: trading
 spec:
   schedule: "*/14 * * * *"
   concurrencyPolicy: Forbid
@@ -93,7 +93,7 @@ spec:
                   scale() {
                     curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" \
                       -H "Content-Type: application/merge-patch+json" \
-                      -X PATCH "$API/apis/apps/v1/namespaces/apps/deployments/hft-bot/scale" \
+                      -X PATCH "$API/apis/apps/v1/namespaces/trading/deployments/hft-bot/scale" \
                       -d "{\"spec\":{\"replicas\":$1}}"
                     echo
                   }
@@ -110,7 +110,7 @@ spec:
                       step=$(( remaining < 15 ? remaining : 15 ))
                       sleep "$step"
                       remaining=$(( remaining - step ))
-                      if curl -sS -m 10 http://trading-engine.apps.svc.cluster.local/events 2>/dev/null \
+                      if curl -sS -m 10 http://trading-engine.trading.svc.cluster.local/events 2>/dev/null \
                           | jq -e --argjson t "$MY_OPEN" \
                             '[.[] | select(.type == "market_open") | .epoch] | max // 0 | . > $t + 30' >/dev/null 2>&1; then
                         echo "=== a newer cycle has started, handing over ==="
@@ -127,7 +127,7 @@ spec:
                   # can't be rewritten from here -- if the durations below no longer
                   # sum to close to the schedule interval, cycles will run back-to-back
                   # with a gap or get skipped by concurrencyPolicy:Forbid, not corrupt.
-                  CONFIG=$(curl -sS -m 60 http://trading-engine.apps.svc.cluster.local/config || echo '{}')
+                  CONFIG=$(curl -sS -m 60 http://trading-engine.trading.svc.cluster.local/config || echo '{}')
 
                   # Open-phase swarm size tracks the live cluster size (more nodes =
                   # more bots) instead of a fixed replica count, so it scales itself
@@ -145,7 +145,7 @@ spec:
 
                   echo "=== phase 1/3: market open, applying volatility jolt ==="
                   MY_OPEN=$(date +%s)
-                  curl -sS -m 60 -X POST http://trading-engine.apps.svc.cluster.local/market-open
+                  curl -sS -m 60 -X POST http://trading-engine.trading.svc.cluster.local/market-open
                   echo
                   scale "$OPEN_BOTS"
                   phase_sleep "$OPEN_SECS"
@@ -155,7 +155,7 @@ spec:
                   phase_sleep "$QUIET_SECS"
 
                   echo "=== phase 3/3: market close ==="
-                  curl -sS -m 60 -X POST http://trading-engine.apps.svc.cluster.local/market-close
+                  curl -sS -m 60 -X POST http://trading-engine.trading.svc.cluster.local/market-close
                   echo
                   scale "$CLOSED_BOTS"
                   phase_sleep "$CLOSED_SECS"

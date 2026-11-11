@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: trading-engine-script
-  namespace: apps
+  namespace: trading
 data:
   engine.py: |
     import json
@@ -13,7 +13,7 @@ data:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import urlparse, parse_qs
 
-    r = redis.Redis(host="redis.apps.svc.cluster.local", port=6379, decode_responses=True)
+    r = redis.Redis(host="redis.trading.svc.cluster.local", port=6379, decode_responses=True)
     STARTING_CASH = 100000.0
 
     # Live-tunable settings, read by the market-open CronJob (bot counts per
@@ -375,7 +375,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: trading-engine
-  namespace: apps
+  namespace: trading
   labels:
     app: trading-engine
 spec:
@@ -421,7 +421,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: trading-engine
-  namespace: apps
+  namespace: trading
 spec:
   type: ClusterIP
   selector:

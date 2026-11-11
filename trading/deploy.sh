@@ -16,8 +16,8 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Shared with other apps, so not part of the manifests (see kustomization.yaml).
-kubectl get namespace apps >/dev/null 2>&1 || kubectl create namespace apps
+# Not part of the manifests (see kustomization.yaml), so create it here.
+kubectl get namespace trading >/dev/null 2>&1 || kubectl create namespace trading
 
 # Ingress controller. Clusters that ship traefik (rke2, k3s) are left alone.
 # Anywhere else (e.g. EKS), install traefik from traefik-values.yaml: a
@@ -43,19 +43,19 @@ fi
 # The dashboard's shared login password lives in a Secret that is never
 # committed (this repo is public). Created once from $TRADING_PASSWORD; later
 # runs leave it alone. To change it: delete the Secret, re-run with the new
-# value, then `kubectl -n apps rollout restart deploy/trading-dashboard`.
-if ! kubectl -n apps get secret trading-users >/dev/null 2>&1; then
+# value, then `kubectl -n trading rollout restart deploy/trading-dashboard`.
+if ! kubectl -n trading get secret trading-users >/dev/null 2>&1; then
   if [ -z "${TRADING_PASSWORD:-}" ]; then
-    echo "Secret apps/trading-users doesn't exist yet -- re-run as: TRADING_PASSWORD='...' trading/deploy.sh" >&2
+    echo "Secret trading/trading-users doesn't exist yet -- re-run as: TRADING_PASSWORD='...' trading/deploy.sh" >&2
     exit 1
   fi
-  printf '%s' "${TRADING_PASSWORD}" | kubectl -n apps create secret generic trading-users --from-file=password=/dev/stdin
-  kubectl -n apps label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
+  printf '%s' "${TRADING_PASSWORD}" | kubectl -n trading create secret generic trading-users --from-file=password=/dev/stdin
+  kubectl -n trading label secret trading-users app.kubernetes.io/part-of=stock-trading-demo
 fi
 
 kubectl apply -k "${DIR}"
 # No-op (no restart) when the values haven't changed.
-kubectl -n apps set env deploy/trading-dashboard \
+kubectl -n trading set env deploy/trading-dashboard \
   WILDCARD_DNS="${WILDCARD_DNS:-sslip.io}" TRADING_HOST="${TRADING_HOST:-}"
 
 # The CronJob's first scheduled tick can be up to 14 minutes away, leaving the
@@ -63,16 +63,16 @@ kubectl -n apps set env deploy/trading-dashboard \
 # ever been recorded, start a cycle right now from the CronJob's own template;
 # it hands over to the next scheduled tick by itself (see phase_sleep in
 # market-open-cron.yaml). Skipped on a redeploy when a session already exists.
-if ! kubectl -n apps exec deploy/redis -- redis-cli lrange events 0 19 2>/dev/null | grep -q market_open; then
-  kubectl -n apps rollout status deploy/trading-engine --timeout=180s
-  kubectl -n apps create job --from=cronjob/market-open "market-open-kickstart-$(date +%s)"
+if ! kubectl -n trading exec deploy/redis -- redis-cli lrange events 0 19 2>/dev/null | grep -q market_open; then
+  kubectl -n trading rollout status deploy/trading-engine --timeout=180s
+  kubectl -n trading create job --from=cronjob/market-open "market-open-kickstart-$(date +%s)"
   echo "No session recorded yet -- started the first market cycle now."
 fi
 
 # Wait for the dashboard to replace ingress.yaml's placeholder host.
-kubectl -n apps rollout status deploy/trading-dashboard --timeout=180s
+kubectl -n trading rollout status deploy/trading-dashboard --timeout=180s
 for _ in $(seq 60); do
-  HOST=$(kubectl -n apps get ingress trading-dashboard -o jsonpath='{.spec.rules[0].host}')
+  HOST=$(kubectl -n trading get ingress trading-dashboard -o jsonpath='{.spec.rules[0].host}')
   [ "${HOST}" != "trading.node-ip.sslip.io" ] && break
   sleep 2
 done

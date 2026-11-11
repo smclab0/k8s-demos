@@ -2,13 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: trading-dashboard
-  namespace: apps
+  namespace: trading
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: trading-dashboard-read-bots
-  namespace: apps
+  namespace: trading
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -19,11 +19,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: trading-dashboard-read-bots
-  namespace: apps
+  namespace: trading
 subjects:
   - kind: ServiceAccount
     name: trading-dashboard
-    namespace: apps
+    namespace: trading
 roleRef:
   kind: Role
   name: trading-dashboard-read-bots
@@ -35,7 +35,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: trading-dashboard-set-ingress-host
-  namespace: apps
+  namespace: trading
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
@@ -46,18 +46,18 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: trading-dashboard-set-ingress-host
-  namespace: apps
+  namespace: trading
 subjects:
   - kind: ServiceAccount
     name: trading-dashboard
-    namespace: apps
+    namespace: trading
 roleRef:
   kind: Role
   name: trading-dashboard-set-ingress-host
   apiGroup: rbac.authorization.k8s.io
 ---
 # Nodes are cluster-scoped, so reading them needs a ClusterRole even though
-# this ServiceAccount otherwise only touches things in the apps namespace.
+# this ServiceAccount otherwise only touches things in the trading namespace.
 # list: the node-count badge; get: its own node's ExternalIP for the Ingress host.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -75,7 +75,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: trading-dashboard
-    namespace: apps
+    namespace: trading
 roleRef:
   kind: ClusterRole
   name: trading-dashboard-read-nodes

@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: trading-dashboard
-  namespace: apps
+  namespace: trading
   annotations:
     # Public ACME (Let's Encrypt/ZeroSSL) can't validate a hostname that
     # resolves to a private RFC1918 address -- using the cluster's internal
