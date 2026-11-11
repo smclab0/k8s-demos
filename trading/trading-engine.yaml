@@ -24,9 +24,9 @@ data:
         "quiet_bots": 2,
         "closed_bots": 0,
         "bot_rate": 50,
-        "open_minutes": 3,
-        "quiet_minutes": 2,
-        "closed_minutes": 1,
+        "open_seconds": 60,
+        "quiet_seconds": 30,
+        "closed_seconds": 30,
     }
     CONFIG_BOUNDS = {  # (min, max) inclusive, applied on write
         "open_bots_per_node": (0, 50),
@@ -37,9 +37,9 @@ data:
         # is a static Kubernetes field, not something this config can rewrite --
         # so these durations can drift from that schedule's cadence. Bounded to
         # a range that keeps a full cycle in the right ballpark of it regardless.
-        "open_minutes": (1, 60),
-        "quiet_minutes": (1, 60),
-        "closed_minutes": (1, 60),
+        "open_seconds": (10, 3600),
+        "quiet_seconds": (10, 3600),
+        "closed_seconds": (10, 3600),
     }
 
     def get_config():
@@ -63,16 +63,16 @@ data:
             r.hset("config", mapping=clean)
         return get_config()
 
-    # Phase boundaries now come from live config (open/quiet/closed_minutes,
+    # Phase boundaries now come from live config (open/quiet/closed_seconds,
     # editable via /admin) instead of hardcoded seconds, so trading-engine,
     # price-feed, and the dashboard's timeline all have to independently derive
     # the same boundaries from the same source rather than duplicating numbers.
     def is_market_closed():
         try:
             cfg = get_config()
-            open_end = cfg["open_minutes"] * 60
-            quiet_end = open_end + cfg["quiet_minutes"] * 60
-            closed_end = quiet_end + cfg["closed_minutes"] * 60
+            open_end = cfg["open_seconds"]
+            quiet_end = open_end + cfg["quiet_seconds"]
+            closed_end = quiet_end + cfg["closed_seconds"]
             for raw in r.lrange("events", 0, 19):
                 event = json.loads(raw)
                 if event.get("type") == "market_open":

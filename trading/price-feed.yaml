@@ -23,14 +23,14 @@ data:
     # Phase durations are live-tunable via the dashboard's /admin page
     # (stored in Redis, defaults below), read fresh on every check so a
     # config change takes effect without restarting this pod.
-    PHASE_DEFAULTS = {"open_minutes": 3, "quiet_minutes": 2, "closed_minutes": 1}
+    PHASE_DEFAULTS = {"open_seconds": 60, "quiet_seconds": 30, "closed_seconds": 30}
 
     def is_market_closed():
         try:
             cfg = r.hgetall("config")
-            open_end = int(cfg.get("open_minutes", PHASE_DEFAULTS["open_minutes"])) * 60
-            quiet_end = open_end + int(cfg.get("quiet_minutes", PHASE_DEFAULTS["quiet_minutes"])) * 60
-            closed_end = quiet_end + int(cfg.get("closed_minutes", PHASE_DEFAULTS["closed_minutes"])) * 60
+            open_end = int(cfg.get("open_seconds", PHASE_DEFAULTS["open_seconds"]))
+            quiet_end = open_end + int(cfg.get("quiet_seconds", PHASE_DEFAULTS["quiet_seconds"]))
+            closed_end = quiet_end + int(cfg.get("closed_seconds", PHASE_DEFAULTS["closed_seconds"]))
             for raw in r.lrange("events", 0, 19):
                 event = json.loads(raw)
                 if event.get("type") == "market_open":

@@ -517,7 +517,7 @@ data:
         let lastEvents = [];
         let CURRENT_USER = null;
         const STARTING_CASH = 100000;
-        let CYCLE_PHASES = [['open', 480], ['quiet', 180], ['closed', 180]]; // updated live from /api/config
+        let CYCLE_PHASES = [['open', 60], ['quiet', 30], ['closed', 30]]; // updated live from /api/config
 
         async function refreshCycleConfig() {
           try {
@@ -525,9 +525,9 @@ data:
             if (!resp.ok) return;
             const cfg = await resp.json();
             CYCLE_PHASES = [
-              ['open', cfg.open_minutes * 60],
-              ['quiet', cfg.quiet_minutes * 60],
-              ['closed', cfg.closed_minutes * 60],
+              ['open', cfg.open_seconds],
+              ['quiet', cfg.quiet_seconds],
+              ['closed', cfg.closed_seconds],
             ];
           } catch (e) {
             // keep the last known durations, next tick will retry
@@ -802,7 +802,7 @@ data:
               const ageSec = Date.now() / 1000 - last.epoch;
               if (last.type === 'market_close') {
                 status.textContent = ageSec < 20
-                  ? `market just closed at ${last.time} — reopens on the next 6-min cycle`
+                  ? `market just closed at ${last.time} — reopens on the next 2-min cycle`
                   : `market closed at ${last.time}`;
                 status.className = 'closed';
               } else {
