@@ -1,0 +1,564 @@
+# One ConfigMap per country: language, currency format and all the page
+# text. The web Deployment mounts locale-uk; the overlays in ../countries/
+# switch it to another one (Fleet picks the overlay from the cluster's
+# dmobnk.smclab.net/country label, see ../fleet.yaml).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: locale-uk
+  namespace: dmobnk
+  labels: {dmobnk.smclab.net/country: uk}
+data:
+  locale.json: |
+    {
+      "country": "uk",
+      "lang": "en-GB",
+      "locale": "en_GB",
+      "currency": "GBP",
+      "money": {
+        "symbol": "£",
+        "pos": "pre",
+        "space": false,
+        "group": ",",
+        "dec": "."
+      },
+      "gold_unit_g": 1,
+      "fx_codes": [
+        "USD",
+        "EUR",
+        "JPY",
+        "CHF",
+        "SGD"
+      ],
+      "currency_names": {
+        "USD": "US dollar",
+        "EUR": "Euro",
+        "JPY": "Japanese yen",
+        "CHF": "Swiss franc",
+        "SGD": "Singapore dollar",
+        "GBP": "British pound",
+        "CAD": "Canadian dollar",
+        "MXN": "Mexican peso"
+      },
+      "mortgage_defaults": {
+        "price": 450000,
+        "deposit": 90000,
+        "years": 25,
+        "rate": 4.5
+      },
+      "savings": [
+        [
+          "Easy access saver",
+          "3.75"
+        ],
+        [
+          "1-year fixed saver",
+          "4.10"
+        ],
+        [
+          "Cash ISA",
+          "3.90"
+        ]
+      ],
+      "aer": "AER",
+      "t": {
+        "demo_label": "Demo",
+        "demo_banner": "DMOBNK (Demo Bank Ldn) is not a real bank. It's a demonstration website: don't enter real personal or card details. All figures are examples and no real money moves.",
+        "country": "Country",
+        "nav_home": "Home",
+        "nav_cards": "Cards",
+        "nav_mortgage": "Mortgages",
+        "nav_rates": "Rates",
+        "eyebrow": "Banking, made simple",
+        "h1": "Banking that fits around your life.",
+        "lede": "Current accounts, credit cards, loans and mortgages, with today's rates and the gold price always to hand.",
+        "cta_cards": "Compare cards",
+        "cta_rates": "Today's rates",
+        "our_services": "Our services",
+        "coming_soon": "Page coming soon",
+        "open_page": "Open →",
+        "svc_accounts": "Account Services",
+        "svc_accounts_d": "Current and savings accounts, statements, transfers and standing orders.",
+        "svc_cards": "Credit Cards",
+        "svc_cards_d": "Compare cards, check your limit, freeze a lost card and see recent spending.",
+        "svc_loans": "Consumer Loans",
+        "svc_loans_d": "Personal and car loans with a repayment calculator and an instant decision.",
+        "svc_mortgage": "Mortgage Loans",
+        "svc_mortgage_d": "First homes, remortgages and buy-to-let, with an agreement in principle online.",
+        "svc_rates": "Rate & Gold Price",
+        "svc_rates_d": "Today's exchange rates, savings rates and the gold price, updated every minute.",
+        "svc_cross": "Cross Border Services",
+        "svc_cross_d": "Send money abroad, receive international payments and track a transfer.",
+        "fx_h": "Exchange rates",
+        "fx_note": "Example rates · per {unit} · updated {time}",
+        "col_cur": "Currency",
+        "col_buy": "We buy",
+        "col_sell": "We sell",
+        "col_today": "Today",
+        "gold_h": "Gold price",
+        "gold_note": "Example price · per gram, 24 carat",
+        "footer": "DMOBNK (Demo Bank Ldn) is a fictional bank. All figures are examples and no real money moves.",
+        "cards_lede": "Pick a card, check your limit and freeze a lost card in one tap.",
+        "choose": "Choose a card",
+        "apr": "Representative APR (example)",
+        "card_everyday": "Everyday",
+        "card_everyday_d": "No annual fee and contactless everywhere.",
+        "card_rewards": "Rewards",
+        "card_rewards_d": "Points on every purchase, swapped for vouchers.",
+        "card_travel": "Travel",
+        "card_travel_d": "No foreign transaction fees abroad.",
+        "your_card": "Your Everyday card ending {last4}",
+        "balance": "Balance",
+        "available": "Available",
+        "limit": "Limit",
+        "freeze": "Freeze card",
+        "unfreeze": "Unfreeze card",
+        "frozen_note": "Card frozen: new payments will be declined.",
+        "example_data": "Example account data.",
+        "mort_lede": "See what you could borrow and get an agreement in principle in about 15 seconds.",
+        "calc_h": "Repayment calculator",
+        "price": "Property price",
+        "deposit": "Deposit",
+        "term": "Term (years)",
+        "rate": "Example rate (%)",
+        "borrow": "You'd borrow {amount} ({ltv}% loan to value)",
+        "per_month": "/ month",
+        "over": "Over {years} years at {rate}%. Example only, not an offer.",
+        "aip": "Get an agreement in principle",
+        "app_h": "Your application",
+        "step_details": "Your details",
+        "step_credit": "Credit check",
+        "step_affordability": "Affordability check",
+        "step_valuation": "Property valuation",
+        "step_aip": "Agreement in principle",
+        "s_done": "Done",
+        "s_checking": "Checking…",
+        "s_next": "Next",
+        "rates_lede": "Exchange, savings and gold prices, refreshed every minute. All example data.",
+        "savings_h": "Savings rates (example)",
+        "error": "Something went wrong. Try again in a moment.",
+        "glance_h": "Your Everyday card",
+        "view_card": "Manage card →"
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: locale-us
+  namespace: dmobnk
+  labels: {dmobnk.smclab.net/country: us}
+data:
+  locale.json: |
+    {
+      "country": "us",
+      "lang": "en-US",
+      "locale": "en_US",
+      "currency": "USD",
+      "money": {
+        "symbol": "$",
+        "pos": "pre",
+        "space": false,
+        "group": ",",
+        "dec": "."
+      },
+      "gold_unit_g": 31.1035,
+      "fx_codes": [
+        "GBP",
+        "EUR",
+        "CAD",
+        "MXN",
+        "JPY"
+      ],
+      "currency_names": {
+        "USD": "US dollar",
+        "EUR": "Euro",
+        "JPY": "Japanese yen",
+        "CHF": "Swiss franc",
+        "SGD": "Singapore dollar",
+        "GBP": "British pound",
+        "CAD": "Canadian dollar",
+        "MXN": "Mexican peso"
+      },
+      "mortgage_defaults": {
+        "price": 550000,
+        "deposit": 110000,
+        "years": 30,
+        "rate": 6.5
+      },
+      "savings": [
+        [
+          "High-yield savings",
+          "4.25"
+        ],
+        [
+          "1-year CD",
+          "4.40"
+        ],
+        [
+          "Money market",
+          "4.05"
+        ]
+      ],
+      "aer": "APY",
+      "t": {
+        "demo_label": "Demo",
+        "demo_banner": "DMOBNK (Demo Bank Ldn) is not a real bank. It's a demonstration website: don't enter real personal or card details. All figures are examples and no real money moves.",
+        "country": "Country",
+        "nav_home": "Home",
+        "nav_cards": "Cards",
+        "nav_mortgage": "Home Loans",
+        "nav_rates": "Rates",
+        "eyebrow": "Banking, made simple",
+        "h1": "Banking that fits around your life.",
+        "lede": "Checking, credit cards, loans and home loans, with today's rates and the gold price always at hand.",
+        "cta_cards": "Compare cards",
+        "cta_rates": "Today's rates",
+        "our_services": "Our services",
+        "coming_soon": "Page coming soon",
+        "open_page": "Open →",
+        "svc_accounts": "Account Services",
+        "svc_accounts_d": "Checking and savings accounts, statements, transfers and recurring payments.",
+        "svc_cards": "Credit Cards",
+        "svc_cards_d": "Compare cards, check your credit limit, lock a lost card and see recent activity.",
+        "svc_loans": "Consumer Loans",
+        "svc_loans_d": "Personal and auto loans with a payment calculator and an instant decision.",
+        "svc_mortgage": "Mortgage Loans",
+        "svc_mortgage_d": "First homes, refinancing and investment properties, with online pre-approval.",
+        "svc_rates": "Rate & Gold Price",
+        "svc_rates_d": "Today's exchange rates, savings rates and the gold price, updated every minute.",
+        "svc_cross": "Cross Border Services",
+        "svc_cross_d": "Send money abroad, receive international wires and track a transfer.",
+        "fx_h": "Exchange rates",
+        "fx_note": "Example rates · per {unit} · updated {time}",
+        "col_cur": "Currency",
+        "col_buy": "We buy",
+        "col_sell": "We sell",
+        "col_today": "Today",
+        "gold_h": "Gold price",
+        "gold_note": "Example price · per troy ounce, 24 karat",
+        "footer": "DMOBNK (Demo Bank Ldn) is a fictional bank. All figures are examples and no real money moves.",
+        "cards_lede": "Pick a card, check your credit limit and lock a lost card in one tap.",
+        "choose": "Choose a card",
+        "apr": "APR (example)",
+        "card_everyday": "Everyday",
+        "card_everyday_d": "No annual fee and tap to pay everywhere.",
+        "card_rewards": "Rewards",
+        "card_rewards_d": "Cash back on every purchase.",
+        "card_travel": "Travel",
+        "card_travel_d": "No foreign transaction fees abroad.",
+        "your_card": "Your Everyday card ending {last4}",
+        "balance": "Balance",
+        "available": "Available credit",
+        "limit": "Credit limit",
+        "freeze": "Lock card",
+        "unfreeze": "Unlock card",
+        "frozen_note": "Card locked: new purchases will be declined.",
+        "example_data": "Example account data.",
+        "mort_lede": "See what you could borrow and get pre-approved in about 15 seconds.",
+        "calc_h": "Payment calculator",
+        "price": "Home price",
+        "deposit": "Down payment",
+        "term": "Term (years)",
+        "rate": "Example rate (%)",
+        "borrow": "You'd borrow {amount} ({ltv}% loan to value)",
+        "per_month": "/ month",
+        "over": "Over {years} years at {rate}%. Example only, not an offer.",
+        "aip": "Get pre-approved",
+        "app_h": "Your application",
+        "step_details": "Your details",
+        "step_credit": "Credit check",
+        "step_affordability": "Income check",
+        "step_valuation": "Home appraisal",
+        "step_aip": "Pre-approval",
+        "s_done": "Done",
+        "s_checking": "Checking…",
+        "s_next": "Next",
+        "rates_lede": "Exchange rates, savings rates and gold prices, refreshed every minute. All example data.",
+        "savings_h": "Savings rates (example)",
+        "error": "Something went wrong. Try again in a moment.",
+        "glance_h": "Your Everyday card",
+        "view_card": "Manage card →"
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: locale-de
+  namespace: dmobnk
+  labels: {dmobnk.smclab.net/country: de}
+data:
+  locale.json: |
+    {
+      "country": "de",
+      "lang": "de-DE",
+      "locale": "de_DE",
+      "currency": "EUR",
+      "money": {
+        "symbol": "€",
+        "pos": "post",
+        "space": true,
+        "group": ".",
+        "dec": ","
+      },
+      "gold_unit_g": 1,
+      "fx_codes": [
+        "USD",
+        "GBP",
+        "JPY",
+        "CHF",
+        "SGD"
+      ],
+      "currency_names": {
+        "USD": "US-Dollar",
+        "EUR": "Euro",
+        "JPY": "Japanischer Yen",
+        "CHF": "Schweizer Franken",
+        "SGD": "Singapur-Dollar",
+        "GBP": "Britisches Pfund",
+        "CAD": "Kanadischer Dollar",
+        "MXN": "Mexikanischer Peso"
+      },
+      "mortgage_defaults": {
+        "price": 500000,
+        "deposit": 100000,
+        "years": 25,
+        "rate": 3.6
+      },
+      "savings": [
+        [
+          "Tagesgeld",
+          "2,75"
+        ],
+        [
+          "Festgeld 1 Jahr",
+          "3,10"
+        ],
+        [
+          "Sparplan",
+          "2,90"
+        ]
+      ],
+      "aer": "% p. a.",
+      "t": {
+        "demo_label": "Demo",
+        "demo_banner": "DMOBNK (Demo Bank Ldn) ist keine echte Bank, sondern eine Demo-Website: Bitte keine echten persönlichen Daten oder Kartendaten eingeben. Alle Zahlen sind Beispiele, es fließt kein echtes Geld.",
+        "country": "Land",
+        "nav_home": "Start",
+        "nav_cards": "Karten",
+        "nav_mortgage": "Baufinanzierung",
+        "nav_rates": "Kurse",
+        "eyebrow": "Banking, ganz einfach",
+        "h1": "Banking, das zu Ihrem Leben passt.",
+        "lede": "Girokonten, Kreditkarten, Kredite und Baufinanzierung, dazu aktuelle Kurse und der Goldpreis immer griffbereit.",
+        "cta_cards": "Karten vergleichen",
+        "cta_rates": "Aktuelle Kurse",
+        "our_services": "Unsere Dienste",
+        "coming_soon": "Seite folgt",
+        "open_page": "Öffnen →",
+        "svc_accounts": "Kontoservices",
+        "svc_accounts_d": "Giro- und Sparkonten, Kontoauszüge, Überweisungen und Daueraufträge.",
+        "svc_cards": "Kreditkarten",
+        "svc_cards_d": "Karten vergleichen, Limit prüfen, verlorene Karte sperren und Umsätze ansehen.",
+        "svc_loans": "Ratenkredite",
+        "svc_loans_d": "Privat- und Autokredite mit Ratenrechner und Sofortentscheidung.",
+        "svc_mortgage": "Baufinanzierung",
+        "svc_mortgage_d": "Erstes Eigenheim, Anschlussfinanzierung und Kapitalanlage, mit Finanzierungsbestätigung online.",
+        "svc_rates": "Kurse & Goldpreis",
+        "svc_rates_d": "Aktuelle Wechselkurse, Sparzinsen und Goldpreis, jede Minute aktualisiert.",
+        "svc_cross": "Auslandsservices",
+        "svc_cross_d": "Geld ins Ausland senden, Zahlungen aus dem Ausland empfangen und Überweisungen verfolgen.",
+        "fx_h": "Wechselkurse",
+        "fx_note": "Beispielkurse · je {unit} · Stand {time}",
+        "col_cur": "Währung",
+        "col_buy": "Ankauf",
+        "col_sell": "Verkauf",
+        "col_today": "Heute",
+        "gold_h": "Goldpreis",
+        "gold_note": "Beispielpreis · pro Gramm, 24 Karat",
+        "footer": "DMOBNK (Demo Bank Ldn) ist eine fiktive Bank. Alle Zahlen sind Beispiele, es fließt kein echtes Geld.",
+        "cards_lede": "Karte wählen, Limit prüfen und eine verlorene Karte mit einem Tipp sperren.",
+        "choose": "Karte wählen",
+        "apr": "Effektiver Jahreszins (Beispiel)",
+        "card_everyday": "Alltag",
+        "card_everyday_d": "Keine Jahresgebühr, kontaktlos überall.",
+        "card_rewards": "Prämien",
+        "card_rewards_d": "Punkte für jeden Einkauf, einlösbar als Gutscheine.",
+        "card_travel": "Reise",
+        "card_travel_d": "Keine Auslandseinsatzentgelte.",
+        "your_card": "Ihre Alltagskarte mit Endziffern {last4}",
+        "balance": "Saldo",
+        "available": "Verfügbar",
+        "limit": "Limit",
+        "freeze": "Karte sperren",
+        "unfreeze": "Karte entsperren",
+        "frozen_note": "Karte gesperrt: neue Zahlungen werden abgelehnt.",
+        "example_data": "Beispieldaten.",
+        "mort_lede": "Sehen Sie, wie viel Sie finanzieren können, und erhalten Sie in rund 15 Sekunden eine Finanzierungsbestätigung.",
+        "calc_h": "Ratenrechner",
+        "price": "Kaufpreis",
+        "deposit": "Eigenkapital",
+        "term": "Laufzeit (Jahre)",
+        "rate": "Beispielzins (%)",
+        "borrow": "Darlehen: {amount} ({ltv} % Beleihung)",
+        "per_month": "/ Monat",
+        "over": "Über {years} Jahre zu {rate} %. Nur ein Beispiel, kein Angebot.",
+        "aip": "Finanzierungsbestätigung anfordern",
+        "app_h": "Ihr Antrag",
+        "step_details": "Ihre Angaben",
+        "step_credit": "Bonitätsprüfung",
+        "step_affordability": "Haushaltsrechnung",
+        "step_valuation": "Objektbewertung",
+        "step_aip": "Finanzierungsbestätigung",
+        "s_done": "Erledigt",
+        "s_checking": "Wird geprüft…",
+        "s_next": "Als Nächstes",
+        "rates_lede": "Wechselkurse, Sparzinsen und Goldpreise, jede Minute aktualisiert. Alles Beispieldaten.",
+        "savings_h": "Sparzinsen (Beispiel)",
+        "error": "Etwas ist schiefgelaufen. Bitte gleich noch einmal versuchen.",
+        "glance_h": "Ihre Alltagskarte",
+        "view_card": "Karte verwalten →"
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: locale-sim
+  namespace: dmobnk
+  labels: {dmobnk.smclab.net/country: sim}
+data:
+  locale.json: |
+    {
+      "country": "sim",
+      "lang": "art-x-simlish",
+      "locale": "sim_SIM",
+      "currency": "SIM",
+      "money": {
+        "symbol": "§",
+        "pos": "pre",
+        "space": false,
+        "group": ",",
+        "dec": "."
+      },
+      "gold_unit_g": 1,
+      "fx_codes": [
+        "GBP",
+        "USD",
+        "EUR",
+        "JPY",
+        "CHF"
+      ],
+      "currency_names": {
+        "USD": "Dollaboo",
+        "EUR": "Euroosh",
+        "JPY": "Yenyen",
+        "CHF": "Swissa Franka",
+        "SGD": "Singa Dollaboo",
+        "GBP": "Poundaboo",
+        "CAD": "Canucka Dollaboo",
+        "MXN": "Pesoosh"
+      },
+      "mortgage_defaults": {
+        "price": 22500000,
+        "deposit": 4500000,
+        "years": 25,
+        "rate": 4.5
+      },
+      "savings": [
+        [
+          "Easy savvy",
+          "3.75"
+        ],
+        [
+          "Wun-yeara fixa",
+          "4.10"
+        ],
+        [
+          "Plumbob savvy",
+          "3.90"
+        ]
+      ],
+      "aer": "AER-oo",
+      "t": {
+        "demo_label": "Demo",
+        "demo_banner": "Demo onlee! DMOBNK (Demo Bank Ldn) is not a real bank. It's a demonstration website: don't enter real personal or card details. All figures are examples and no real money moves.",
+        "country": "Landaboo",
+        "nav_home": "Hoozaboo",
+        "nav_cards": "Cardaboo",
+        "nav_mortgage": "Hoozagoo",
+        "nav_rates": "Ratiza",
+        "eyebrow": "Bankaboo, easy peasy",
+        "h1": "Bankaboo for yoo life. Oo be gah!",
+        "lede": "Accountias, creddaboo cardas, loanish an' hoozagoo, plus toodai ratas an' golda pricey. Vadish!",
+        "cta_cards": "Compara cardas",
+        "cta_rates": "Toodai ratas",
+        "our_services": "Ourra servoos",
+        "coming_soon": "Pagey soona",
+        "open_page": "Opena →",
+        "svc_accounts": "Accountia Servoo",
+        "svc_accounts_d": "Currenta an' savvy accountias, statementos, sendabobs.",
+        "svc_cards": "Creddaboo Cardas",
+        "svc_cards_d": "Compara cardas, checka limitoo, freezabob a losta carda.",
+        "svc_loans": "Konsooma Loanish",
+        "svc_loans_d": "Persona an' carra loanish, calcabob an' instanta yesbo.",
+        "svc_mortgage": "Hoozagoo Loanish",
+        "svc_mortgage_d": "Firsta hoozas, remorgaboo an' buy-to-lettabob.",
+        "svc_rates": "Rata & Golda Pricey",
+        "svc_rates_d": "Toodai exchanga ratas, savvy ratas an' golda pricey, ev'ry minoo.",
+        "svc_cross": "Bordaboo Servoos",
+        "svc_cross_d": "Senda Simoleons abroada an' trakka da sendabob.",
+        "fx_h": "Exchanga ratas",
+        "fx_note": "Exampla ratas · per {unit} · updata {time}",
+        "col_cur": "Moneebo",
+        "col_buy": "Wee buya",
+        "col_sell": "Wee sella",
+        "col_today": "Toodai",
+        "gold_h": "Golda pricey",
+        "gold_note": "Exampla pricey · per grammo, 24 karrabob",
+        "footer": "DMOBNK (Demo Bank Ldn) ish fictiona banka. Noo reala Simoleons. Dag dag!",
+        "cards_lede": "Picka carda, checka limitoo an' freezabob a losta carda. Zip zap!",
+        "choose": "Picka carda",
+        "apr": "Reppa APR (exampla)",
+        "card_everyday": "Evrydai",
+        "card_everyday_d": "Noo yeary feeboo, tappa tappa evrywhere.",
+        "card_rewards": "Plumbob Points",
+        "card_rewards_d": "Pointas onna ev'ry shoppabob.",
+        "card_travel": "Travva",
+        "card_travel_d": "Noo foreigna feeboo abroada.",
+        "your_card": "Yoo Evrydai carda endabing {last4}",
+        "balance": "Balanca",
+        "available": "Availaboo",
+        "limit": "Limitoo",
+        "freeze": "Freezabob carda",
+        "unfreeze": "Unfreezabob carda",
+        "frozen_note": "Carda freezabobbed: noo new payboos.",
+        "example_data": "Exampla accountia data.",
+        "mort_lede": "Seeza what yoo borrowa an' getta yesbo in 15 secondoos.",
+        "calc_h": "Payboo calcabob",
+        "price": "Hooza pricey",
+        "deposit": "Depositoo",
+        "term": "Yeary termoo",
+        "rate": "Exampla rata (%)",
+        "borrow": "Yoo borrowa {amount} ({ltv}% loana-to-valoo)",
+        "per_month": "/ moonth",
+        "over": "Ovva {years} yearys at {rate}%. Exampla only, noo offa.",
+        "aip": "Getta da yesbo",
+        "app_h": "Yoo applicaboo",
+        "step_details": "Yoo detailoos",
+        "step_credit": "Creddaboo checka",
+        "step_affordability": "Affordaboo checka",
+        "step_valuation": "Hooza valooabob",
+        "step_aip": "Da yesbo",
+        "s_done": "Doneboo",
+        "s_checking": "Checkabing…",
+        "s_next": "Nexta",
+        "rates_lede": "Exchanga, savvy an' golda pricey, freshabobbed ev'ry minoo. All exampla.",
+        "savings_h": "Savvy ratas (exampla)",
+        "error": "Uh oh, gerbits! Tryza again inna momentoo.",
+        "glance_h": "Yoo Evrydai carda",
+        "view_card": "Manaja carda →"
+      }
+    }

@@ -1,7 +1,25 @@
 # Settings for deploying this directory with Rancher Fleet (continuous
-# delivery). Fleet renders kustomization.yaml and installs it as a Helm release.
+# delivery). Fleet renders the kustomization and installs it as a Helm release.
 
 # Fleet creates `dmobnk` if it's missing. The bundle itself doesn't declare the
 # namespace, because Helm won't adopt one that already exists (deploy.sh
 # creates it when deploying without Fleet).
 defaultNamespace: dmobnk
+
+# Language and currency follow the cluster's label in Rancher:
+#   dmobnk.smclab.net/country = uk | us | de | sim
+# A cluster without the label (or with another value) gets the UK site from
+# ./kustomization.yaml. Changing a label makes Fleet redeploy on its own.
+targetCustomizations:
+  - name: us
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/country: us}
+    kustomize: {dir: countries/us}
+  - name: de
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/country: de}
+    kustomize: {dir: countries/de}
+  - name: sim
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/country: sim}
+    kustomize: {dir: countries/sim}

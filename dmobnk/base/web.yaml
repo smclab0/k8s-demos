@@ -1,5 +1,5 @@
-# The DMOBNK front end: a UK bank in pounds sterling. Its text and number
-# formats come from the locale-uk ConfigMap.
+# The DMOBNK front end. Its language and currency come from the mounted
+# locale ConfigMap: locale-uk here, swapped by the overlays in ../countries/.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +13,9 @@ spec:
     metadata:
       labels: {app: web, dmobnk.smclab.net/tier: web}
     spec:
+      # Named explicitly: leaving it out keeps a deleted ServiceAccount on
+      # clusters that once had one (the deprecated serviceAccount field).
+      serviceAccountName: default
       automountServiceAccountToken: false
       topologySpreadConstraints:
         - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web}}}

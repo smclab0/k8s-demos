@@ -1,5 +1,6 @@
-"""DMOBNK web front end: a UK bank in pounds sterling. All the page text
-and number formats come from the mounted locale-uk ConfigMap."""
+"""DMOBNK web front end. All the page text, the currency and the number
+formats come from the mounted locale ConfigMap: locale-uk by default, or
+another country's via the overlays in ../countries/."""
 import html
 import json
 import time
@@ -167,7 +168,8 @@ def page(name, title, body, extra_js=""):
     pages = [("", T["nav_home"]), ("cards", T["nav_cards"]), ("mortgage", T["nav_mortgage"]), ("rates", T["nav_rates"])]
     cur_page = ' aria-current="page"'
     nav = "".join(f'<a href="{BASE}{p}"{cur_page if p == name else ""}>{e(lbl)}</a>' for p, lbl in pages)
-    cfg = {"base": BASE, "lang": L["lang"], "money": L["money"], "t": T}
+    # Simlish has no real locale; dates use en-GB.
+    cfg = {"base": BASE, "lang": L["lang"] if L["country"] != "sim" else "en-GB", "money": L["money"], "t": T}
     cfg_json = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
     return f"""<!doctype html>
 <html lang="{e(L['lang'])}">

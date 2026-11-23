@@ -1,0 +1,11 @@
+# DMOBNK for country "us": the base, with the web pods mounting locale-us.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target: {kind: Deployment, name: web}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/1/configMap/name
+        value: locale-us

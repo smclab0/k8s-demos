@@ -1,25 +1,7 @@
+# The default deployment: the UK site, in pounds sterling. The other
+# countries are overlays in countries/<cc>/; Fleet picks one from the
+# cluster's dmobnk.smclab.net/country label (see fleet.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
-# No Namespace here: deploy.sh creates `dmobnk`, so a Fleet/Helm install can
-# own everything in it without fighting over the namespace itself.
 resources:
-  - redis.yaml
-  - locales.yaml
-  - services.yaml
-  - web.yaml
-  - rates-cron.yaml
-  - ingress.yaml
-
-# web.py lives as a plain file; the generated ConfigMap gets a content hash in
-# its name, so editing web.py rolls the web pods automatically.
-configMapGenerator:
-  - name: dmobnk-web-script
-    namespace: dmobnk
-    files:
-      - web.py
-
-labels:
-  - pairs:
-      app.kubernetes.io/part-of: dmobnk
-    includeSelectors: false
+  - base
