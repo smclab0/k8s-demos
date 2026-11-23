@@ -1,0 +1,143 @@
+# One front end per country. They all run the same web.py (from the
+# dmobnk-web-script ConfigMap, generated from web.py by kustomization.yaml)
+# and differ only in the locale-<country> ConfigMap they mount.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-uk
+  namespace: dmobnk
+  labels: {app: web-uk, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: uk}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web-uk}}
+  template:
+    metadata:
+      labels: {app: web-uk, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: uk}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web-uk}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/web.py"]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-web-script}}
+        - {name: locale, configMap: {name: locale-uk}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-uk, namespace: dmobnk}
+spec: {selector: {app: web-uk}, ports: [{port: 80, targetPort: 8080}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-us
+  namespace: dmobnk
+  labels: {app: web-us, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: us}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web-us}}
+  template:
+    metadata:
+      labels: {app: web-us, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: us}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web-us}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/web.py"]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-web-script}}
+        - {name: locale, configMap: {name: locale-us}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-us, namespace: dmobnk}
+spec: {selector: {app: web-us}, ports: [{port: 80, targetPort: 8080}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-de
+  namespace: dmobnk
+  labels: {app: web-de, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: de}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web-de}}
+  template:
+    metadata:
+      labels: {app: web-de, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: de}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web-de}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/web.py"]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-web-script}}
+        - {name: locale, configMap: {name: locale-de}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-de, namespace: dmobnk}
+spec: {selector: {app: web-de}, ports: [{port: 80, targetPort: 8080}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-sim
+  namespace: dmobnk
+  labels: {app: web-sim, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: sim}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: web-sim}}
+  template:
+    metadata:
+      labels: {app: web-sim, dmobnk.smclab.net/tier: web, dmobnk.smclab.net/country: sim}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web-sim}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/web.py"]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-web-script}}
+        - {name: locale, configMap: {name: locale-sim}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web-sim, namespace: dmobnk}
+spec: {selector: {app: web-sim}, ports: [{port: 80, targetPort: 8080}]}

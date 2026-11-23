@@ -1,0 +1,40 @@
+# Shared state for the services: rates, the card's frozen flag, mortgage
+# applications and the locks that stop visitors piling up demo actions.
+# Nothing here is precious, so no volume: a restart just reseeds the rates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: dmobnk
+  labels: {app: redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: 6379}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: redis, namespace: dmobnk}
+spec: {selector: {app: redis}, ports: [{port: 6379, targetPort: 6379}]}
+---
+# Only the bank's own pods may talk to Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: redis, namespace: dmobnk}
+spec:
+  podSelector: {matchLabels: {app: redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchExpressions: [{key: dmobnk.smclab.net/tier, operator: In, values: [web, service]}]}
+      ports: [{port: 6379}]

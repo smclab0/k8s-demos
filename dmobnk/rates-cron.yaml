@@ -1,0 +1,26 @@
+# Moves the example exchange rates and gold price on every minute, by asking
+# rates-svc to take one random-walk step. Its last run shows on the Rates page.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rates-refresh
+  namespace: dmobnk
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 50
+      template:
+        metadata: {labels: {app: rates-refresh}}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: refresh
+              image: curlimages/curl:8.10.1
+              command: ["curl", "-fsS", "-m", "20", "-X", "POST", "http://rates-svc:8080/refresh"]
+              resources: {requests: {cpu: 10m, memory: 16Mi}, limits: {memory: 32Mi}}

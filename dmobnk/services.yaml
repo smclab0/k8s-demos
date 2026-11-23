@@ -1,0 +1,459 @@
+# The six bank services. Each is its own Deployment + Service so it can be
+# scaled, killed and healed on its own; they share one small script, picked
+# by the SERVICE env var.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dmobnk-svc-script
+  namespace: dmobnk
+data:
+  svc.py: |
+    import json
+    import os
+    import random
+    import secrets
+    import ssl
+    import time
+    import urllib.parse
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import redis
+
+    SERVICE = os.environ["SERVICE"]
+    POD = os.environ.get("POD_NAME", "")
+    NODE = os.environ.get("NODE_NAME", "")
+    VERSION = os.environ.get("VERSION", "1.0")
+    NS = "dmobnk"
+    r = redis.Redis(host="redis", port=6379, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+
+    # ---- rates: example FX and gold prices, random-walked by the rates-refresh CronJob
+    START_PER_GBP = {"GBP": 1.0, "USD": 1.27, "EUR": 1.17, "JPY": 190.4, "CHF": 1.12,
+                     "SGD": 1.71, "CAD": 1.74, "MXN": 22.1, "SIM": 50.0}
+    START_GOLD_GBP_G = 80.0
+
+    def rates_seed():
+        if not r.exists("rates"):
+            r.hset("rates", mapping=START_PER_GBP)
+            r.hset("rates_prev", mapping=START_PER_GBP)
+            r.set("gold", START_GOLD_GBP_G)
+            r.rpush("gold_hist", *[START_GOLD_GBP_G] * 30)
+            r.set("rates_updated", time.time())
+
+    def rates_refresh():
+        rates_seed()
+        cur = {k: float(v) for k, v in r.hgetall("rates").items()}
+        new = {k: (1.0 if k == "GBP" else round(v * (1 + random.gauss(0, 0.004)), 6)) for k, v in cur.items()}
+        gold = round(float(r.get("gold")) * (1 + random.gauss(0.0003, 0.006)), 4)
+        pipe = r.pipeline()
+        pipe.hset("rates_prev", mapping=cur)
+        pipe.hset("rates", mapping=new)
+        pipe.set("gold", gold)
+        pipe.rpush("gold_hist", gold)
+        pipe.ltrim("gold_hist", -30, -1)
+        pipe.set("rates_updated", time.time())
+        pipe.execute()
+
+    def rates_get():
+        rates_seed()
+        return {
+            "per_gbp": {k: float(v) for k, v in r.hgetall("rates").items()},
+            "prev_per_gbp": {k: float(v) for k, v in r.hgetall("rates_prev").items()},
+            "gold_gbp_per_g": float(r.get("gold")),
+            "gold_hist": [float(x) for x in r.lrange("gold_hist", 0, -1)],
+            "updated": float(r.get("rates_updated") or 0),
+            "pod": POD,
+        }
+
+    def burn(seconds):
+        # Deliberate CPU work so a rush of requests trips the autoscaler.
+        end = time.time() + seconds
+        x = 0
+        while time.time() < end:
+            x += 1
+        return x
+
+    # ---- cards: one example card whose frozen state is shared by every pod
+    CARD = {"last4": "4821", "balance_gbp": 642.18, "limit_gbp": 3000.0,
+            "spend": [["2026-11-22", "Borough Market", 18.40], ["2026-11-21", "TfL Travel", 7.80],
+                      ["2026-11-20", "Waterstones", 24.99], ["2026-11-19", "Pret A Manger", 6.35]]}
+
+    # ---- mortgage: each agreement-in-principle runs as its own Kubernetes Job
+    K8S = "https://kubernetes.default.svc"
+    TOKEN = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    CA = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    STEPS = ["credit", "affordability", "valuation"]
+
+    def k8s(method, path, body=None):
+        with open(TOKEN) as f:
+            tok = f.read()
+        req = urllib.request.Request(K8S + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5, context=ssl.create_default_context(cafile=CA)) as resp:
+            return json.load(resp)
+
+    def mortgage_apply():
+        app_id = secrets.token_hex(3)
+        job = f"aip-check-{app_id}"
+        script = "set -e; for s in " + " ".join(STEPS) + "; do sleep 4; " \
+                 f"curl -fsS -X POST \"http://mortgage-svc:8080/progress?id={app_id}&step=$s\"; done; " \
+                 f"curl -fsS -X POST \"http://mortgage-svc:8080/progress?id={app_id}&step=done\""
+        k8s("POST", f"/apis/batch/v1/namespaces/{NS}/jobs", {
+            "apiVersion": "batch/v1", "kind": "Job",
+            "metadata": {"name": job, "labels": {"app": "aip-check", "app.kubernetes.io/part-of": "dmobnk"}},
+            "spec": {
+                "ttlSecondsAfterFinished": 3600, "backoffLimit": 1, "activeDeadlineSeconds": 120,
+                "template": {
+                    "metadata": {"labels": {"app": "aip-check", "app.kubernetes.io/part-of": "dmobnk"}},
+                    "spec": {"restartPolicy": "Never", "containers": [{
+                        "name": "check", "image": "curlimages/curl:8.10.1",
+                        "command": ["sh", "-c", script],
+                        "resources": {"requests": {"cpu": "10m", "memory": "16Mi"}, "limits": {"memory": "32Mi"}}}]}},
+            },
+        })
+        r.hset(f"aip:{app_id}", mapping={"job": job, "steps": "", "status": "running", "started": time.time()})
+        r.expire(f"aip:{app_id}", 3600)
+        return {"id": app_id, "job": job}
+
+    class Handler(BaseHTTPRequestHandler):
+        def _json(self, code, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _body(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                return json.loads(self.rfile.read(min(n, 65536)) or b"{}")
+            except ValueError:
+                return {}
+
+        def do_GET(self):
+            u = urllib.parse.urlsplit(self.path)
+            q = dict(urllib.parse.parse_qsl(u.query))
+            try:
+                if u.path == "/healthz":
+                    return self._json(200, {"ok": True})
+                if u.path == "/info":
+                    return self._json(200, {"service": SERVICE, "pod": POD, "node": NODE, "version": VERSION})
+                if SERVICE == "rates" and u.path == "/rates":
+                    return self._json(200, rates_get())
+                if SERVICE == "rates" and u.path == "/quote":
+                    if q.get("burn"):
+                        burn(0.1)
+                    return self._json(200, rates_get())
+                if SERVICE == "cards" and u.path == "/card":
+                    return self._json(200, dict(CARD, frozen=r.get("card_frozen") == "1", pod=POD))
+                if SERVICE == "mortgage" and u.path == "/app":
+                    a = r.hgetall(f"aip:{q.get('id', '')}")
+                    if not a:
+                        return self._json(404, {"error": "unknown application"})
+                    return self._json(200, {"id": q["id"], "job": a["job"], "status": a["status"],
+                                            "steps": [s for s in a["steps"].split(",") if s]})
+                if SERVICE == "mortgage" and u.path == "/stats":
+                    return self._json(200, {"completed_today": int(r.get(f"aip_done:{time.strftime('%Y-%m-%d')}") or 0)})
+            except redis.RedisError:
+                return self._json(503, {"error": "redis unavailable"})
+            self._json(404, {"error": "not found"})
+
+        def do_POST(self):
+            u = urllib.parse.urlsplit(self.path)
+            q = dict(urllib.parse.parse_qsl(u.query))
+            try:
+                if SERVICE == "rates" and u.path == "/refresh":
+                    rates_refresh()
+                    return self._json(200, {"ok": True, "pod": POD})
+                if SERVICE == "cards" and u.path == "/freeze":
+                    frozen = r.get("card_frozen") != "1"
+                    r.set("card_frozen", "1" if frozen else "0")
+                    return self._json(200, {"frozen": frozen})
+                if SERVICE == "mortgage" and u.path == "/apply":
+                    if not r.set("aip_lock", "1", nx=True, ex=3):
+                        return self._json(429, {"error": "busy"})
+                    return self._json(200, mortgage_apply())
+                if SERVICE == "mortgage" and u.path == "/progress":
+                    key = f"aip:{q.get('id', '')}"
+                    step = q.get("step", "")
+                    if not r.exists(key) or step not in STEPS + ["done"]:
+                        return self._json(400, {"error": "bad progress"})
+                    if step == "done":
+                        r.hset(key, "status", "done")
+                        day = f"aip_done:{time.strftime('%Y-%m-%d')}"
+                        r.incr(day)
+                        r.expire(day, 172800)
+                    else:
+                        steps = [s for s in r.hget(key, "steps").split(",") if s]
+                        if step not in steps:
+                            r.hset(key, "steps", ",".join(steps + [step]))
+                    return self._json(200, {"ok": True})
+            except redis.RedisError:
+                return self._json(503, {"error": "redis unavailable"})
+            except Exception as e:
+                return self._json(502, {"error": str(e)[:200]})
+            self._json(404, {"error": "not found"})
+
+        def log_message(self, *args):
+            pass
+
+    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mortgage-svc
+  namespace: dmobnk
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mortgage-svc-jobs
+  namespace: dmobnk
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mortgage-svc-jobs
+  namespace: dmobnk
+subjects:
+  - kind: ServiceAccount
+    name: mortgage-svc
+    namespace: dmobnk
+roleRef:
+  kind: Role
+  name: mortgage-svc-jobs
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts-svc
+  namespace: dmobnk
+  labels: {app: accounts-svc, dmobnk.smclab.net/tier: service}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: accounts-svc}}
+  template:
+    metadata: {labels: {app: accounts-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: accounts-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: accounts}
+            - {name: VERSION, value: "1.4"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cards-svc
+  namespace: dmobnk
+  labels: {app: cards-svc, dmobnk.smclab.net/tier: service}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: cards-svc}}
+  template:
+    metadata: {labels: {app: cards-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: cards-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: cards}
+            - {name: VERSION, value: "1.2"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loans-svc
+  namespace: dmobnk
+  labels: {app: loans-svc, dmobnk.smclab.net/tier: service}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: loans-svc}}
+  template:
+    metadata: {labels: {app: loans-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: loans-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: loans}
+            - {name: VERSION, value: "2.0"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mortgage-svc
+  namespace: dmobnk
+  labels: {app: mortgage-svc, dmobnk.smclab.net/tier: service}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: mortgage-svc}}
+  template:
+    metadata: {labels: {app: mortgage-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      serviceAccountName: mortgage-svc
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: mortgage-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: mortgage}
+            - {name: VERSION, value: "1.1"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rates-svc
+  namespace: dmobnk
+  labels: {app: rates-svc, dmobnk.smclab.net/tier: service}
+spec:
+  # No replicas: the HorizontalPodAutoscaler below owns the count.
+  selector: {matchLabels: {app: rates-svc}}
+  template:
+    metadata: {labels: {app: rates-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: rates-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: rates}
+            - {name: VERSION, value: "3.2"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 50m, memory: 48Mi}, limits: {cpu: 500m, memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rates-svc
+  namespace: dmobnk
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: rates-svc}
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}
+  behavior:
+    # Scale down after 60 s of calm instead of the default 5 min, so a demo
+    # visitor sees the pods go away again.
+    scaleDown: {stabilizationWindowSeconds: 60}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossborder-svc
+  namespace: dmobnk
+  labels: {app: crossborder-svc, dmobnk.smclab.net/tier: service}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: crossborder-svc}}
+  template:
+    metadata: {labels: {app: crossborder-svc, dmobnk.smclab.net/tier: service}}
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: crossborder-svc}}}
+      containers:
+        - name: svc
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install --no-cache-dir -q redis==5.0.8 >/tmp/pip.log 2>&1 && exec python3 -u /app/svc.py"]
+          env:
+            - {name: SERVICE, value: crossborder}
+            - {name: VERSION, value: "1.3"}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 96Mi}}
+          volumeMounts: [{name: script, mountPath: /app, readOnly: true}]
+      volumes: [{name: script, configMap: {name: dmobnk-svc-script}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: accounts-svc, namespace: dmobnk}
+spec: {selector: {app: accounts-svc}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: cards-svc, namespace: dmobnk}
+spec: {selector: {app: cards-svc}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: loans-svc, namespace: dmobnk}
+spec: {selector: {app: loans-svc}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mortgage-svc, namespace: dmobnk}
+spec: {selector: {app: mortgage-svc}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: rates-svc, namespace: dmobnk}
+spec: {selector: {app: rates-svc}, ports: [{port: 8080, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: crossborder-svc, namespace: dmobnk}
+spec: {selector: {app: crossborder-svc}, ports: [{port: 8080, targetPort: 8080}]}
