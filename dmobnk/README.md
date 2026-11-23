@@ -1,6 +1,6 @@
 # DMOBNK · Demo Bank Ldn
 
-A fictional bank, available in four countries: UK (£), US ($), Germany (€) and the Sims (Simlish, §). Choosing a country switches the language, currency and number format. All the figures are examples and no real money moves.
+A fictional UK bank, in British English and pounds sterling. All the figures are examples and no real money moves.
 
 Pages: **Home** (services, your card at a glance, exchange rates, gold price), **Cards** (compare cards, balance, recent spending, freeze a card), **Mortgages** (repayment calculator and an agreement in principle) and **Rates** (exchange rates, gold price, savings rates).
 
@@ -8,7 +8,7 @@ Pages: **Home** (services, your card at a glance, exchange rates, gold price), *
 
 | Piece | Role |
 |---|---|
-| `web-uk`, `web-us`, `web-de`, `web-sim` | The same `web.py` four times, each mounting its own `locale-<country>` ConfigMap. |
+| `web` | The front end (`web.py`). Its text and number formats come from the `locale-uk` ConfigMap. |
 | `accounts-svc`, `cards-svc`, `loans-svc`, `mortgage-svc`, `rates-svc`, `crossborder-svc` | One backend service per banking service, all running `svc.py`. |
 | `mortgage-svc` | Runs each agreement-in-principle check as a short Job. |
 | `rates-refresh` CronJob | Moves the example rates and gold price every minute. |
@@ -25,12 +25,13 @@ The script creates the `dmobnk` namespace, runs `kubectl apply -k`, waits for ev
 
 Editing `web.py` changes the ConfigMap's hash name, so the next deploy rolls the web pods.
 
-## Adding a country
+Old per-country links (`/dmobnk/de/cards` and so on) redirect to the same page under `/dmobnk/`.
 
-1. Add a `locale-<cc>` ConfigMap to `locales.yaml`.
-2. Add a `web-<cc>` Deployment and Service to `web.yaml`.
-3. Add an Ingress path to `ingress.yaml`.
-4. Add the country to the `COUNTRIES` list in `web.py`.
+### With Rancher Fleet
+
+Point a GitRepo at this repo with path `dmobnk`. `fleet.yaml` sets `defaultNamespace: dmobnk`, so Fleet creates the namespace itself. The target cluster needs ingress-nginx, cert-manager with the `letsencrypt-cloudflare` ClusterIssuer and metrics-server (for the rates autoscaler).
+
+Don't mix the two methods on one cluster: Helm won't adopt resources that `deploy.sh` already created. Delete the namespace first (see below), then let Fleet install it.
 
 ## Remove
 

@@ -1,0 +1,7 @@
+# Settings for deploying this directory with Rancher Fleet (continuous
+# delivery). Fleet renders kustomization.yaml and installs it as a Helm release.
+
+# Fleet creates `dmobnk` if it's missing. The bundle itself doesn't declare the
+# namespace, because Helm won't adopt one that already exists (deploy.sh
+# creates it when deploying without Fleet).
+defaultNamespace: dmobnk

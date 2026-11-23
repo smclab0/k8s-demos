@@ -1,6 +1,6 @@
-# DMOBNK lives under dev.smclab.net/dmobnk/, one path per country. The
-# dev-website Ingress in `apps` keeps serving everything else on that host;
-# ingress-nginx merges the two and picks the longest matching path.
+# DMOBNK lives under dev.smclab.net/dmobnk/. The dev-website Ingress in
+# `apps` keeps serving everything else on that host; ingress-nginx merges
+# the two and picks the longest matching path.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -17,8 +17,4 @@ spec:
     - host: dev.smclab.net
       http:
         paths:
-          - {path: /dmobnk/us, pathType: Prefix, backend: {service: {name: web-us, port: {number: 80}}}}
-          - {path: /dmobnk/de, pathType: Prefix, backend: {service: {name: web-de, port: {number: 80}}}}
-          - {path: /dmobnk/sim, pathType: Prefix, backend: {service: {name: web-sim, port: {number: 80}}}}
-          # /dmobnk/ and /dmobnk/uk/ both go to the UK site.
-          - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web-uk, port: {number: 80}}}}
+          - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}

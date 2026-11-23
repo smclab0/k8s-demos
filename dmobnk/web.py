@@ -1,5 +1,5 @@
-"""DMOBNK web front end. One copy runs per country (web-uk, web-us, ...);
-everything country-specific comes from the mounted locale ConfigMap."""
+"""DMOBNK web front end: a UK bank in pounds sterling. All the page text
+and number formats come from the mounted locale-uk ConfigMap."""
 import html
 import json
 import time
@@ -10,10 +10,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 T = L["t"]
-CC = L["country"]
-BASE = f"/dmobnk/{CC}/"
-PREFIXES = [f"/dmobnk/{CC}"] + (["/dmobnk"] if CC == "uk" else [])
-COUNTRIES = [("uk", "UK", "£"), ("us", "US", "$"), ("de", "DE", "€"), ("sim", "SIM", "§")]
+BASE = "/dmobnk/"
+# Old per-country links (/dmobnk/de/cards etc.) redirect to the same page.
+OLD_PREFIXES = ("/dmobnk/uk", "/dmobnk/us", "/dmobnk/de", "/dmobnk/sim")
 SERVICES = [("accounts", None), ("cards", "cards"), ("loans", None),
             ("mortgage", "mortgage"), ("rates", "rates"), ("cross", None)]
 
@@ -103,10 +102,6 @@ header.main .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px;p
 nav.links{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:14px;font-weight:600;flex:1}
 nav.links a{color:#0b1b3a;text-decoration:none;padding:6px 0;border-bottom:2px solid transparent}
 nav.links a[aria-current]{border-color:#2453ff;color:#1f4fe0}
-.tags{display:flex;gap:4px;padding:4px;border-radius:14px;background:#eef2f8}
-.tags a{min-height:40px;padding:0 12px;border-radius:10px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#26375c;text-decoration:none}
-.tags a span{font-weight:500;opacity:.8}
-.tags a[aria-current]{background:#0b1b3a;color:#fff}
 main{padding-block:32px 48px;display:flex;flex-direction:column;gap:36px}
 h1{margin:0;font:700 clamp(34px,5vw,52px)/1.05 "Space Grotesk",sans-serif;letter-spacing:-1.4px;text-wrap:balance;hyphens:auto}
 h2{margin:0;font:700 22px/1.2 "Space Grotesk",sans-serif;letter-spacing:-.4px}
@@ -170,11 +165,9 @@ LOGO = ('<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rec
 
 def page(name, title, body, extra_js=""):
     pages = [("", T["nav_home"]), ("cards", T["nav_cards"]), ("mortgage", T["nav_mortgage"]), ("rates", T["nav_rates"])]
-    cur_page, cur_tag = ' aria-current="page"', ' aria-current="true"'
+    cur_page = ' aria-current="page"'
     nav = "".join(f'<a href="{BASE}{p}"{cur_page if p == name else ""}>{e(lbl)}</a>' for p, lbl in pages)
-    tags = "".join(f'<a href="/dmobnk/{c}/{name}"{cur_tag if c == CC else ""} lang="en">'
-                   f'<b class="mono">{code}</b><span>{sym}</span></a>' for c, code, sym in COUNTRIES)
-    cfg = {"base": BASE, "lang": L["lang"] if CC != "sim" else "en-GB", "money": L["money"], "t": T}
+    cfg = {"base": BASE, "lang": L["lang"], "money": L["money"], "t": T}
     cfg_json = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
     return f"""<!doctype html>
 <html lang="{e(L['lang'])}">
@@ -191,7 +184,6 @@ def page(name, title, body, extra_js=""):
 <header class="main"><div class="wrap">
   <a class="logo" href="{BASE}">{LOGO}<span><b>DMOBNK</b><small>Demo Bank Ldn</small></span></a>
   <nav class="links" aria-label="DMOBNK">{nav}</nav>
-  <nav class="tags" aria-label="{e(T['country'])}">{tags}</nav>
 </div></header>
 <main class="wrap">{body}</main>
 <footer><div class="wrap"><span>{e(T['footer'])}</span></div></footer>
@@ -482,9 +474,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlsplit(self.path)
         if u.path == "/healthz":
             return "/healthz", {}
-        for p in PREFIXES:
-            if u.path == p or u.path.startswith(p + "/"):
-                return u.path[len(p):].lstrip("/"), dict(urllib.parse.parse_qsl(u.query))
+        for old in OLD_PREFIXES:  # the old per-country URLs, e.g. /dmobnk/de/cards
+            if u.path == old or u.path.startswith(old + "/"):
+                return ("redirect", BASE + u.path[len(old):].lstrip("/")), {}
+        if u.path == "/dmobnk" or u.path.startswith(BASE):
+            return u.path[len("/dmobnk"):].lstrip("/"), dict(urllib.parse.parse_qsl(u.query))
         return None, {}
 
     def do_GET(self):
@@ -493,6 +487,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         if rest is None:
             return self._send(302, "text/plain", "", {"Location": BASE})
+        if isinstance(rest, tuple):
+            return self._send(301, "text/plain", "", {"Location": rest[1]})
         try:
             if rest in PAGES:
                 if rest == "" and not urllib.parse.urlsplit(self.path).path.startswith(BASE):
