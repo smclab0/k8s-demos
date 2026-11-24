@@ -1,0 +1,5 @@
+# Fleet: the DMOCRP group homepage, into the dmocrp namespace, on every
+# cluster this GitRepo targets (no labels needed). It links to whichever
+# DMOBNK (../dmobnk) and DMOSHP (../dmoshp) apps run on the same cluster.
+# Its Ingress isn't in the bundle: the app creates it (common/ingress_host.py).
+defaultNamespace: dmocrp

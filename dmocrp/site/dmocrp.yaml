@@ -1,0 +1,66 @@
+# The DMOCRP group homepage (dmocrp.py). Optional settings in the
+# dmocrp-site ConfigMap: host (default dmocrp.<external address>.sslip.io)
+# and ingressClass (default: the cluster's default class).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dmocrp-web
+  namespace: dmocrp
+  labels: {app: dmocrp-web}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: dmocrp-web}}
+  template:
+    metadata:
+      labels: {app: dmocrp-web}
+    spec:
+      serviceAccountName: dmocrp-web
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: dmocrp-web}}}
+      # The promo video is too big for a ConfigMap: fetch it from the repo's
+      # media/ folder when the pod starts. Never fails the pod: without
+      # internet the page shows a link instead.
+      initContainers:
+        - name: fetch-video
+          image: python:3.12-alpine
+          command:
+            - sh
+            - -c
+            - |
+              for f in democorp-promo.mp4 democorp-promo-poster.jpg; do
+                wget -q -T 30 -O "/media/$f.part" "$MEDIA_URL/$f" && mv "/media/$f.part" "/media/$f" || { rm -f "/media/$f.part"; echo "couldn't download $f"; }
+              done
+          env:
+            - {name: MEDIA_URL, value: "https://raw.githubusercontent.com/smclab0/k8s-demos/main/media"}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 64Mi}}
+          volumeMounts:
+            - {name: media, mountPath: /media}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/dmocrp.py"]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - name: SITE_HOST
+              valueFrom: {configMapKeyRef: {name: dmocrp-site, key: host, optional: true}}
+            - name: INGRESS_CLASS
+              valueFrom: {configMapKeyRef: {name: dmocrp-site, key: ingressClass, optional: true}}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
+            - {name: media, mountPath: /media, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmocrp-script}}
+        - {name: lib, configMap: {name: dmocrp-lib}}
+        - {name: media, emptyDir: {sizeLimit: 64Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dmocrp-web, namespace: dmocrp}
+spec: {selector: {app: dmocrp-web}, ports: [{port: 80, targetPort: 8080}]}

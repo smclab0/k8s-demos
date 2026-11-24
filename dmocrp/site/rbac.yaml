@@ -1,0 +1,53 @@
+# dmocrp-web creates its own Ingress and keeps it pointed at the cluster
+# (../common/ingress_host.py), and reads the group apps' Ingress hosts so it
+# can link to them. Nothing here writes outside the dmocrp namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: dmocrp-web, namespace: dmocrp}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: dmocrp-web, namespace: dmocrp}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["dmocrp-web"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["dmocrp-web"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: dmocrp-web, namespace: dmocrp}
+subjects:
+  - {kind: ServiceAccount, name: dmocrp-web, namespace: dmocrp}
+roleRef: {kind: Role, name: dmocrp-web, apiGroup: rbac.authorization.k8s.io}
+---
+# Cluster-wide, read only: the node, LoadBalancer Services and
+# IngressClasses (to find the address), and Ingresses (the apps' hosts; it
+# only looks in dmobnk and dmoshp).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: dmocrp-web}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses", "ingresses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: dmocrp-web}
+subjects:
+  - {kind: ServiceAccount, name: dmocrp-web, namespace: dmocrp}
+roleRef: {kind: ClusterRole, name: dmocrp-web, apiGroup: rbac.authorization.k8s.io}
