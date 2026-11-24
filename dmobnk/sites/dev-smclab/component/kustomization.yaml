@@ -25,3 +25,22 @@ patches:
             http:
               paths:
                 - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+  # Kube Power (../../../admin/bank) on the same host, under /dmobnk/admin.
+  - target: {kind: Ingress, name: kube-power}
+    patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: kube-power
+        annotations:
+          dmobnk.smclab.net/host: "off"
+      spec:
+        ingressClassName: nginx
+        tls:
+          - hosts: [dev.smclab.net]
+            secretName: dmobnk-tls
+        rules:
+          - host: dev.smclab.net
+            http:
+              paths:
+                - {path: /dmobnk/admin, pathType: Prefix, backend: {service: {name: kube-power, port: {number: 80}}}}

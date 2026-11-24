@@ -1,0 +1,42 @@
+# Kube Power for the online bank, at /dmobnk/admin on the bank's host.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+components:
+  - ../base
+resources:
+  - role.yaml
+patches:
+  - target: {kind: Deployment, name: kube-power}
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: kube-power}
+      spec:
+        template:
+          spec:
+            containers:
+              - name: kube-power
+                env:
+                  - {name: ADMIN_BASE, value: "/dmobnk/admin"}
+                  - {name: APP_URL, value: "/dmobnk/"}
+                  - {name: APP_NAME, value: "the bank"}
+                  - {name: HOST_PREFIX, value: "dmobnk"}
+                  - {name: ADMIN_APPS, value: "web,accounts-svc,cards-svc,loans-svc,mortgage-svc,rates-svc,crossborder-svc"}
+                  - {name: ADMIN_HPA, value: "rates-svc"}
+                  - {name: ADMIN_SURGE, value: "rates-svc"}
+                  - {name: ADMIN_CRON, value: "rates-refresh"}
+                  - name: SITE_HOST
+                    valueFrom: {configMapKeyRef: {name: dmobnk-site, key: host, optional: true}}
+                  - name: INGRESS_CLASS
+                    valueFrom: {configMapKeyRef: {name: dmobnk-site, key: ingressClass, optional: true}}
+  - target: {kind: Ingress, name: kube-power}
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/http/paths/0/path
+        value: /dmobnk/admin
+  # Show the "Admin" link in the bank's footer.
+  - target: {kind: Deployment, name: web}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: KUBE_POWER_URL, value: /dmobnk/admin}

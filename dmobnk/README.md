@@ -13,29 +13,32 @@ Pages: **Home** (services, your card at a glance, exchange rates, gold price), *
 | `mortgage-svc` | Runs each agreement-in-principle check as a short Job. |
 | `rates-refresh` CronJob | Moves the example rates and gold price every minute. |
 | `redis` | Shared state (card frozen, applications, rates). |
-| `control.py` | **Kube Power**, the admin-only control room at `/dmobnk/admin`, served by the `web` pods. |
+| `kube-power` (only with `role=admin`) | **Kube Power**, the admin-only control room at `/dmobnk/admin`. See below. |
 
 ## Kube Power control room (admins only)
 
-`https://dev.smclab.net/dmobnk/admin` (or the **Admin** link in the bank's footer) opens the control room after you sign in with the admin password. It shows the `dmobnk` namespace live: pods on each node, the deployments, the rates autoscaler, the rates CronJob and recent events. You can also:
+Kube Power is deployed only to clusters labelled **`role=admin`** (the online bank plus the control room at `/dmobnk/admin`, linked as **Admin** in the bank's footer) or **`role=branch-admin`** (the branch kiosk plus the control room at `/admin`). Other clusters don't run it at all: no pod, no permissions, no link. `dev.smclab.net` (`sites/dev-smclab`) always has it.
+
+After you sign in with the admin password, it shows the `dmobnk` namespace live: pods on each node, the deployments and recent events (and, on the bank, the rates autoscaler and rates CronJob). You can also:
 
 | Control | What it shows |
 |---|---|
 | **Scale out** | Set a deployment's replicas (1 to 6). Not `rates-svc`, which its autoscaler sizes. |
 | **Kill a pod** | Self-healing: a pod is deleted and its ReplicaSet replaces it. It only kills where another ready pod keeps the service up. |
 | **Rolling restart** | Zero-downtime rollout: every pod of a deployment is replaced, a few at a time. |
-| **Traffic surge** | Autoscaling: a Job of 4 curl pods loads `rates-svc` for 90 s, and the HPA adds pods, then removes them. |
+| **Traffic surge** (bank only) | Autoscaling: a Job of 4 curl pods loads `rates-svc` for 90 s, and the HPA adds pods, then removes them. |
 
-`redis` is never offered, since it holds the bank's state. The web pods' `dmobnk-web` Role (`base/admin.yaml`) only covers the `dmobnk` namespace, and it can only change the bank's own deployments.
+On the bank it controls the bank's services; on a kiosk, `branch-web`. Redis is never offered, since it holds the app's state.
 
-The password is the `password` key of the `dmobnk-admin` Secret, which isn't kept in git. `deploy.sh` creates one with a random password the first time and prints it. With Fleet, create the Secret yourself (the control room stays switched off until you do):
+It runs as its own small `kube-power` Deployment (`admin/base/kube_power.py` serving `control.py`), with its own Ingress on the app's host. Its `kube-power` Role (`admin/bank/role.yaml` or `admin/branch/role.yaml`) only covers the `dmobnk` namespace and can only change those deployments, so the public web pods hold no such permissions.
+
+**The password** is the `password` key of the `dmobnk-admin` Secret, never kept in git. If the Secret doesn't exist, Kube Power creates it with a random password on its first start. Read it with:
 
 ```sh
-kubectl -n dmobnk create secret generic dmobnk-admin --from-literal=password='choose-one'
-kubectl -n dmobnk rollout restart deploy/web
-# read it back later:
 kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base64 -d
 ```
+
+To choose your own, replace the Secret and restart: `kubectl -n dmobnk create secret generic dmobnk-admin --from-literal=password='choose-one' --dry-run=client -o yaml | kubectl apply -f - && kubectl -n dmobnk rollout restart deploy/kube-power`. The Secret survives Fleet upgrades, but not a reinstall (which deletes the namespace), so a reinstalled cluster gets a new password.
 
 A sign-in lasts 8 hours. Five wrong passwords from one address lock it out for 5 minutes. If Fleet's drift correction is on, it will undo scaling done from the control room.
 
@@ -72,7 +75,9 @@ kubectl -n dmobnk rollout restart deploy/branch-web
 
 ## Layout
 
-- `base/`: the online bank's manifests, `web.py`, `control.py` and the control room's RBAC (`admin.yaml`). The web pods mount `locale-uk`.
+- `base/`: the online bank's manifests and `web.py`. The web pods mount `locale-uk`.
+- `admin/`: Kube Power. `admin/base/` is the Deployment, Service, Ingress and code; `admin/bank/` and `admin/branch/` are Components that set what it controls.
+- `with-admin/bank/<cc>`, `with-admin/branch/<cc>`: an app plus Kube Power, for `role=admin` and `role=branch-admin` clusters.
 - `common/`: `ingress_host.py`, which both apps use to point their Ingress at the cluster they run on.
 - `sites/dev-smclab/`: lenny-new's `dev.smclab.net` Ingress, as a component plus one overlay per country (used by `deploy.sh`).
 - `locales/`: the four `locale-<country>` ConfigMaps, used by both apps (bank text under `t`, branch text under `b`).
@@ -87,8 +92,12 @@ Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Ranc
 
 | Label | App |
 |---|---|
-| `dmobnk.smclab.net/role=branch`, or just `role=branch` | The branch kiosk (`branch/`) |
-| no `role` label, or another value | The online bank |
+| `role=branch` | The branch kiosk (`branch/`) |
+| `role=admin` | The online bank plus Kube Power at `/dmobnk/admin` |
+| `role=branch-admin` | The branch kiosk plus Kube Power at `/admin` |
+| no `role` label, or another value | The online bank, without Kube Power |
+
+The long key `dmobnk.smclab.net/role` works the same as `role`. A cluster has only one `role`, so a kiosk that also needs the control room is `branch-admin`.
 
 | Label | Language and currency (either app) |
 |---|---|
@@ -97,14 +106,14 @@ Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Ranc
 | `dmobnk.smclab.net/country=de` | German, € |
 | `dmobnk.smclab.net/country=sim` | Simlish, § |
 
-Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, branch entries first) and deploys that app and country's overlay. Change a label and Fleet redeploys on its own: adding `role=branch` swaps the online bank for the branch app. `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
+Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, role entries first) and deploys that app and country's overlay. Change a label and Fleet redeploys on its own: adding `role=branch` swaps the online bank for the branch app. `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
 
 A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, for the rates autoscaler, metrics-server. Both apps point their own Ingress at the cluster they land on (`common/ingress_host.py`), using its default IngressClass and an sslip.io host built from the cluster's external address, the same way for both (see *Where it's served* above):
 
 | App | URL on a Fleet cluster |
 |---|---|
-| Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (control room: `…/dmobnk/admin`) |
-| Branch kiosk | `http://branch.<external address>.sslip.io/` |
+| Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (with `role=admin`, Kube Power at `…/dmobnk/admin`) |
+| Branch kiosk | `http://branch.<external address>.sslip.io/` (with `role=branch-admin`, Kube Power at `…/admin`) |
 
 To fix the online bank's host or class instead, create a `dmobnk-site` ConfigMap (keys `host`, `ingressClass`) and restart `deploy/web`. To see what was picked: `kubectl -n dmobnk logs deploy/web | grep -E 'using|ingress'`.
 
@@ -116,9 +125,10 @@ Don't mix Fleet and `deploy.sh` on one cluster: Helm won't adopt resources that 
 kubectl config use-context lenny-new
 ./dmobnk/deploy.sh               # the online bank, UK; or: ./dmobnk/deploy.sh de   (uk | us | de | sim)
 ./dmobnk/deploy.sh branch        # the branch kiosk instead; or: ./dmobnk/deploy.sh branch de
+./dmobnk/deploy.sh branch-admin  # the kiosk plus Kube Power (and `admin` for the bank plus Kube Power)
 ```
 
-The script creates the `dmobnk` namespace, applies the chosen overlay, waits for every rollout and seeds the first rates. For the online bank it uses `sites/dev-smclab/<cc>`, which serves it at `https://dev.smclab.net/dmobnk/` (ingress-nginx, cert-manager's `letsencrypt-cloudflare`); run it with `DMOBNK_SITE=auto` for the self-configuring sslip.io Ingress instead. Running it again with another country switches the site.
+The script creates the `dmobnk` namespace, applies the chosen overlay, waits for every rollout and seeds the first rates. For the online bank it uses `sites/dev-smclab/<cc>`, which serves it at `https://dev.smclab.net/dmobnk/` (ingress-nginx, cert-manager's `letsencrypt-cloudflare`); run it with `DMOBNK_SITE=auto` for the self-configuring sslip.io Ingress instead. The dev.smclab.net site always includes Kube Power; with `DMOBNK_SITE=auto`, only `admin` adds it. The script prints Kube Power's URL and how to read its password. Running it again with another country switches the site.
 
 Editing `base/web.py` (or `branch/base/branch.py`) changes the ConfigMap's hash name, so the next deploy rolls those pods.
 

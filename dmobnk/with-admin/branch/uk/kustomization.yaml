@@ -1,0 +1,7 @@
+# the branch kiosk for country "uk", plus the Kube Power control room (role=branch-admin).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../branch/base
+components:
+  - ../../../admin/branch

@@ -11,7 +11,6 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import control  # Kube Power, the admin-only control room at /dmobnk/admin
 
 sys.path.insert(0, "/opt/dmobnk")
 import ingress_host  # noqa: E402  (mounted from the dmobnk-ingress-host ConfigMap)
@@ -19,6 +18,9 @@ import ingress_host  # noqa: E402  (mounted from the dmobnk-ingress-host ConfigM
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 T = L["t"]
 BASE = "/dmobnk/"
+# Set only where Kube Power runs (role=admin clusters, see ../admin/bank).
+_admin = os.environ.get("KUBE_POWER_URL", "")
+ADMIN_LINK = f'<a href="{html.escape(_admin)}" style="color:#4a5a7d">Admin</a>' if _admin else ""
 # Old per-country links (/dmobnk/de/cards etc.) redirect to the same page.
 OLD_PREFIXES = ("/dmobnk/uk", "/dmobnk/us", "/dmobnk/de", "/dmobnk/sim")
 SERVICES = [("accounts", None), ("cards", "cards"), ("loans", None),
@@ -195,7 +197,7 @@ def page(name, title, body, extra_js=""):
   <nav class="links" aria-label="DMOBNK">{nav}</nav>
 </div></header>
 <main class="wrap">{body}</main>
-<footer><div class="wrap"><span>{e(T['footer'])}</span><a href="{BASE}admin" style="color:#4a5a7d">Admin</a></div></footer>
+<footer><div class="wrap"><span>{e(T['footer'])}</span>{ADMIN_LINK}</div></footer>
 <script id="cfg" type="application/json">{cfg_json}</script>
 <script>{COMMON_JS}</script>
 <script>{extra_js}</script>
@@ -498,8 +500,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(302, "text/plain", "", {"Location": BASE})
         if isinstance(rest, tuple):
             return self._send(301, "text/plain", "", {"Location": rest[1]})
-        if rest == "admin" or rest.startswith("admin/"):
-            return control.handle(self, "GET", rest, q)
         try:
             if rest in PAGES:
                 if rest == "" and not urllib.parse.urlsplit(self.path).path.startswith(BASE):
@@ -528,8 +528,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         rest, q = self._route()
-        if isinstance(rest, str) and (rest == "admin" or rest.startswith("admin/")):
-            return control.handle(self, "POST", rest, q)
         try:
             if rest == "api/card/freeze":
                 code, res = svc("cards-svc", "/freeze", "POST")

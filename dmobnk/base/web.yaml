@@ -13,9 +13,8 @@ spec:
     metadata:
       labels: {app: web, dmobnk.smclab.net/tier: web}
     spec:
-      # dmobnk-web (admin.yaml) lets the Kube Power control room read and
-      # act on the dmobnk namespace (only signed-in admins can use it), and
-      # lets the pods point the Ingress at this cluster (ingress.yaml).
+      # dmobnk-web (rbac.yaml) lets the pods point the Ingress at this
+      # cluster (ingress.yaml), and nothing else.
       serviceAccountName: dmobnk-web
       automountServiceAccountToken: true
       topologySpreadConstraints:
@@ -35,9 +34,6 @@ spec:
               valueFrom: {configMapKeyRef: {name: dmobnk-site, key: host, optional: true}}
             - name: INGRESS_CLASS
               valueFrom: {configMapKeyRef: {name: dmobnk-site, key: ingressClass, optional: true}}
-            # The control room's sign-in password. No Secret, no control room.
-            - name: ADMIN_PASSWORD
-              valueFrom: {secretKeyRef: {name: dmobnk-admin, key: password, optional: true}}
           readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
           resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
           volumeMounts:

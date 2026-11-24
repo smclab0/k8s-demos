@@ -7,14 +7,34 @@
 defaultNamespace: dmobnk
 
 # Two cluster labels in Rancher decide what each cluster gets:
-#   dmobnk.smclab.net/role    = branch  -> the branch kiosk (branch/)
-#   (or just role = branch)     instead of the online bank. Any other value,
-#                               or no label: the online bank.
+#   role = branch        -> the branch kiosk (branch/) instead of the online bank
+#   role = admin         -> the online bank plus Kube Power, the admin control
+#                           room, at /dmobnk/admin (admin/bank)
+#   role = branch-admin  -> the branch kiosk plus Kube Power at /admin
+#                           (admin/branch)
+#   No role label, or another value: the online bank, without Kube Power.
+#   The long key dmobnk.smclab.net/role works the same as role.
 #   dmobnk.smclab.net/country = uk | us | de | sim -> language and currency.
 #                               No label (or another value): UK.
-# Fleet uses the FIRST entry below that matches, so the branch entries come
-# first. Changing a label makes Fleet redeploy on its own.
+# Fleet uses the FIRST entry below that matches, so the role entries come
+# before the country-only ones. Changing a label makes Fleet redeploy on its own.
 targetCustomizations:
+  - name: branch-admin-us
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch-admin, dmobnk.smclab.net/country: us}
+    kustomize: {dir: with-admin/branch/us}
+  - name: branch-admin-de
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch-admin, dmobnk.smclab.net/country: de}
+    kustomize: {dir: with-admin/branch/de}
+  - name: branch-admin-sim
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch-admin, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: with-admin/branch/sim}
+  - name: branch-admin
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch-admin}
+    kustomize: {dir: with-admin/branch/uk}
   - name: branch-us
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/role: branch, dmobnk.smclab.net/country: us}
@@ -31,7 +51,39 @@ targetCustomizations:
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/role: branch}
     kustomize: {dir: branch}
-  # The same, for clusters labelled with the short key role=branch.
+  - name: admin-us
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: admin, dmobnk.smclab.net/country: us}
+    kustomize: {dir: with-admin/bank/us}
+  - name: admin-de
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: admin, dmobnk.smclab.net/country: de}
+    kustomize: {dir: with-admin/bank/de}
+  - name: admin-sim
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: admin, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: with-admin/bank/sim}
+  - name: admin
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: admin}
+    kustomize: {dir: with-admin/bank/uk}
+  # The same, for clusters labelled with the short key role.
+  - name: branch-admin-us-short
+    clusterSelector:
+      matchLabels: {role: branch-admin, dmobnk.smclab.net/country: us}
+    kustomize: {dir: with-admin/branch/us}
+  - name: branch-admin-de-short
+    clusterSelector:
+      matchLabels: {role: branch-admin, dmobnk.smclab.net/country: de}
+    kustomize: {dir: with-admin/branch/de}
+  - name: branch-admin-sim-short
+    clusterSelector:
+      matchLabels: {role: branch-admin, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: with-admin/branch/sim}
+  - name: branch-admin-short
+    clusterSelector:
+      matchLabels: {role: branch-admin}
+    kustomize: {dir: with-admin/branch/uk}
   - name: branch-us-short
     clusterSelector:
       matchLabels: {role: branch, dmobnk.smclab.net/country: us}
@@ -48,6 +100,22 @@ targetCustomizations:
     clusterSelector:
       matchLabels: {role: branch}
     kustomize: {dir: branch}
+  - name: admin-us-short
+    clusterSelector:
+      matchLabels: {role: admin, dmobnk.smclab.net/country: us}
+    kustomize: {dir: with-admin/bank/us}
+  - name: admin-de-short
+    clusterSelector:
+      matchLabels: {role: admin, dmobnk.smclab.net/country: de}
+    kustomize: {dir: with-admin/bank/de}
+  - name: admin-sim-short
+    clusterSelector:
+      matchLabels: {role: admin, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: with-admin/bank/sim}
+  - name: admin-short
+    clusterSelector:
+      matchLabels: {role: admin}
+    kustomize: {dir: with-admin/bank/uk}
   - name: us
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/country: us}
@@ -76,6 +144,14 @@ diff:
     - apiVersion: networking.k8s.io/v1
       kind: Ingress
       name: branch-web
+      namespace: dmobnk
+      jsonPointers:
+        - /spec/rules/0/host
+        - /spec/ingressClassName
+    # Kube Power does the same for its own Ingress (admin/base/kube_power.py).
+    - apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      name: kube-power
       namespace: dmobnk
       jsonPointers:
         - /spec/rules/0/host

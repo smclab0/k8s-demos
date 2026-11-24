@@ -1,70 +1,67 @@
 #!/usr/bin/env bash
-# Deploys DMOBNK to the current kube context without Fleet.
+# Deploys DMOBNK to the current kube context without Fleet. The first word
+# matches the cluster's role label under Fleet (see fleet.yaml):
 #
-#   dmobnk/deploy.sh [uk|us|de|sim]          the online bank, at
-#                                            https://dev.smclab.net/dmobnk/
-#   dmobnk/deploy.sh branch [uk|us|de|sim]   the branch kiosk instead,
-#                                            at http://branch.<node IP>.sslip.io/
+#   dmobnk/deploy.sh [uk|us|de|sim]                the online bank, at
+#                                                  https://dev.smclab.net/dmobnk/
+#                                                  (with Kube Power at /dmobnk/admin)
+#   dmobnk/deploy.sh admin [uk|us|de|sim]          the same; with DMOBNK_SITE=auto,
+#                                                  the bank plus Kube Power on sslip.io
+#   dmobnk/deploy.sh branch [uk|us|de|sim]         the branch kiosk instead,
+#                                                  at http://branch.<address>.sslip.io/
+#   dmobnk/deploy.sh branch-admin [uk|us|de|sim]   the kiosk plus Kube Power at /admin
 # The country defaults to uk.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP=bank
-if [ "${1:-}" = "branch" ]; then APP=branch; shift; fi
+ROLE=bank
+case "${1:-}" in admin|branch|branch-admin) ROLE="$1"; shift ;; esac
 COUNTRY="${1:-uk}"
-ROOT="${DIR}"
-[ "${APP}" = branch ] && ROOT="${DIR}/branch"
-case "${COUNTRY}" in
-  uk) SRC="${ROOT}" ;;
-  us|de|sim) SRC="${ROOT}/countries/${COUNTRY}" ;;
-  *) echo "unknown country '${COUNTRY}': use uk, us, de or sim" >&2; exit 1 ;;
+case "${COUNTRY}" in uk|us|de|sim) ;; *) echo "unknown country '${COUNTRY}': use uk, us, de or sim" >&2; exit 1 ;; esac
+sub() { if [ "${COUNTRY}" = uk ]; then echo "$1"; else echo "$1/countries/${COUNTRY}"; fi; }
+
+# lenny-new's site: dev.smclab.net with TLS (sites/dev-smclab, which always
+# includes Kube Power), instead of the self-configuring sslip.io Ingress
+# that Fleet clusters get. Set DMOBNK_SITE=auto to use sslip.io here too.
+SITE="${DMOBNK_SITE:-dev-smclab}"
+case "${ROLE}" in
+  branch)       SRC="$(sub "${DIR}/branch")"; ADMIN="" ;;
+  branch-admin) SRC="${DIR}/with-admin/branch/${COUNTRY}"; ADMIN=/admin ;;
+  admin)        SRC="${DIR}/with-admin/bank/${COUNTRY}"; ADMIN=/dmobnk/admin ;;
+  bank)         SRC="$(sub "${DIR}")"; ADMIN="" ;;
+esac
+case "${ROLE}:${SITE}" in
+  bank:dev-smclab|admin:dev-smclab) SRC="${DIR}/sites/dev-smclab/${COUNTRY}"; ADMIN=/dmobnk/admin ;;
 esac
 
 kubectl get namespace dmobnk >/dev/null 2>&1 || kubectl create namespace dmobnk
-
-if [ "${APP}" = branch ]; then
-  kubectl apply -k "${SRC}"
-  for d in branch-redis branch-web; do
-    kubectl -n dmobnk rollout status "deploy/${d}" --timeout=300s
-  done
-  # branch-web sets the Ingress host a few seconds after it starts.
-  HOST=""
-  for _ in $(seq 1 30); do
-    HOST="$(kubectl -n dmobnk get ingress branch-web -o jsonpath='{.spec.rules[0].host}')"
-    [ "${HOST}" != "branch.node-ip.sslip.io" ] && break
-    sleep 2
-  done
-  echo "Deployed the branch (${COUNTRY}): http://${HOST}/"
-  exit 0
-fi
-
-# The Kube Power control room's admin password. Made once and kept; it's
-# never stored in git. Print it with:
-#   kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base64 -d
-NEW_PASSWORD=""
-if ! kubectl -n dmobnk get secret dmobnk-admin >/dev/null 2>&1; then
-  NEW_PASSWORD="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
-  kubectl -n dmobnk create secret generic dmobnk-admin --from-literal=password="${NEW_PASSWORD}" >/dev/null
-fi
-
-# lenny-new's site: dev.smclab.net with TLS (sites/dev-smclab), instead of
-# the self-configuring sslip.io Ingress that Fleet clusters get. Set
-# DMOBNK_SITE=auto to deploy the sslip.io one here too.
-if [ "${DMOBNK_SITE:-dev-smclab}" = "dev-smclab" ]; then
-  SRC="${DIR}/sites/dev-smclab/${COUNTRY}"
-fi
 kubectl apply -k "${SRC}"
 
-for d in redis accounts-svc cards-svc loans-svc mortgage-svc rates-svc crossborder-svc web; do
+if [ "${ROLE#branch}" != "${ROLE}" ]; then
+  INGRESS=branch-web; APPS="branch-redis branch-web"; PATH_="/"
+else
+  INGRESS=dmobnk; APPS="redis accounts-svc cards-svc loans-svc mortgage-svc rates-svc crossborder-svc web"; PATH_="/dmobnk/"
+fi
+[ -n "${ADMIN}" ] && APPS="${APPS} kube-power"
+for d in ${APPS}; do
   kubectl -n dmobnk rollout status "deploy/${d}" --timeout=300s
 done
 
-# Seed the rates now rather than waiting for the CronJob's first tick.
-kubectl -n dmobnk create job --from=cronjob/rates-refresh "rates-refresh-init-$(date +%s)" >/dev/null
+if [ "${INGRESS}" = dmobnk ]; then
+  # Seed the rates now rather than waiting for the CronJob's first tick.
+  kubectl -n dmobnk create job --from=cronjob/rates-refresh "rates-refresh-init-$(date +%s)" >/dev/null
+fi
 
-if [ "${DMOBNK_SITE:-dev-smclab}" = "dev-smclab" ]; then URL="https://dev.smclab.net/dmobnk/"; else
-  sleep 15; URL="http://$(kubectl -n dmobnk get ingress dmobnk -o jsonpath='{.spec.rules[0].host}')/dmobnk/"; fi
-echo "Deployed (${COUNTRY}): ${URL}"
-echo "Control room: ${URL}admin"
-if [ -n "${NEW_PASSWORD}" ]; then
-  echo "New admin password: ${NEW_PASSWORD}"
+# The apps set their Ingress host a few seconds after they start.
+HOST=""
+for _ in $(seq 1 30); do
+  HOST="$(kubectl -n dmobnk get ingress "${INGRESS}" -o jsonpath='{.spec.rules[0].host}')"
+  case "${HOST}" in *node-ip.sslip.io) sleep 2 ;; *) break ;; esac
+done
+SCHEME=http; [ "${HOST}" = dev.smclab.net ] && SCHEME=https
+echo "Deployed ${ROLE} (${COUNTRY}): ${SCHEME}://${HOST}${PATH_}"
+if [ -n "${ADMIN}" ]; then
+  # Kube Power made a random password in the dmobnk-admin Secret on its
+  # first start (or kept the one already there).
+  echo "Kube Power: ${SCHEME}://${HOST}${ADMIN}"
+  echo "Its password: kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base64 -d"
 fi

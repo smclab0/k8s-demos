@@ -1,14 +1,18 @@
-"""Kube Power: DMOBNK's admin-only control room, served at /dmobnk/admin.
+"""Kube Power: DMOBNK's admin-only control room. It runs as its own
+kube-power Deployment (kube_power.py serves it), deployed only to clusters
+labelled role=admin (the online bank, at /dmobnk/admin) or
+role=branch-admin (the branch kiosk, at /admin); see ../../fleet.yaml.
 
-It shows the dmobnk namespace live (pods by node, deployments, the rates
+It shows the dmobnk namespace live (pods by node, deployments, the
 autoscaler, events) and lets a signed-in admin break things to show
 Kubernetes fixing them: scale a deployment, kill a pod, do a rolling restart
-or send a traffic surge at rates-svc.
+and, on the bank, send a traffic surge at rates-svc.
 
-Sign-in uses the password in the `dmobnk-admin` Secret (key `password`),
-passed in as ADMIN_PASSWORD. With no password, or no ServiceAccount token,
-the control room stays switched off. Everything it touches is limited to the
-dmobnk namespace by the dmobnk-web Role (admin.yaml) and to APPS below."""
+Sign-in uses the `password` key of the `dmobnk-admin` Secret. If there's
+no such Secret, the first start creates one with a random password (read it
+with kubectl, see the README). Everything it touches is limited to the
+dmobnk namespace by the kube-power Role and to ADMIN_APPS below."""
+import base64
 import hashlib
 import hmac
 import html
@@ -23,24 +27,33 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-NS = "dmobnk"
+NS = os.environ.get("POD_NAMESPACE", "dmobnk")
 K8S = "https://kubernetes.default.svc"
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
-PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
-ENABLED = bool(PASSWORD) and os.path.exists(f"{SA}/token")
+ENABLED = os.path.exists(f"{SA}/token")
+PASSWORD = ""                    # set by init() from the dmobnk-admin Secret
+_KEY = b""
+SECRET = "dmobnk-admin"
 POD = os.environ.get("POD_NAME", "")
 NODE = os.environ.get("NODE_NAME", "").split(".")[0]
-BASE = "/dmobnk/admin"
 COOKIE = "dmobnk_admin"
 SESSION_S = 8 * 3600
-# Every web replica derives the same key from the shared password, so a
-# session works whichever pod serves the next request.
-_KEY = hashlib.sha256(b"dmobnk-admin-session:" + PASSWORD.encode()).digest()
 
-# The deployments the controls may touch. redis is left out on purpose: it
-# holds the bank's state and runs as a single pod.
-APPS = ["web", "accounts-svc", "cards-svc", "loans-svc", "mortgage-svc", "rates-svc", "crossborder-svc"]
-HPA_APPS = {"rates-svc"}  # replicas set by the autoscaler, not by hand
+
+def _env_list(name, default):
+    return [x.strip() for x in os.environ.get(name, default).split(",") if x.strip()]
+
+
+# What this control room drives, set per app by ../bank and ../branch.
+BASE = os.environ.get("ADMIN_BASE", "/dmobnk/admin").rstrip("/")
+APP_URL = os.environ.get("APP_URL", "/dmobnk/")
+APP_NAME = os.environ.get("APP_NAME", "the bank")
+# The deployments the controls may touch. Redis is never in the list: it
+# holds the app's state and runs as a single pod.
+APPS = _env_list("ADMIN_APPS", "web,accounts-svc,cards-svc,loans-svc,mortgage-svc,rates-svc,crossborder-svc")
+HPA_APPS = set(_env_list("ADMIN_HPA", "rates-svc"))   # sized by an autoscaler, not by hand
+SURGE = os.environ.get("ADMIN_SURGE", "rates-svc").strip()   # "" = no traffic surge
+CRON = os.environ.get("ADMIN_CRON", "rates-refresh").strip()  # "" = no CronJob tile
 SCALE_MIN, SCALE_MAX = 1, 6
 
 _ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt") if ENABLED else None
@@ -50,7 +63,9 @@ _last_kill = [0.0]
 
 # ---------------------------------------------------------------- k8s
 class K8sError(Exception):
-    pass
+    def __init__(self, msg, code=0):
+        super().__init__(msg)
+        self.code = code
 
 
 def k8s(method, path, body=None, ctype="application/json"):
@@ -68,7 +83,40 @@ def k8s(method, path, body=None, ctype="application/json"):
             msg = json.load(err).get("message", "")
         except ValueError:
             msg = ""
-        raise K8sError(f"Kubernetes said {err.code}{': ' + msg if msg else ''}")
+        raise K8sError(f"Kubernetes said {err.code}{': ' + msg if msg else ''}", err.code)
+
+
+def init():
+    """Load the sign-in password from the dmobnk-admin Secret, creating the
+    Secret with a random password if there isn't one. Retries until the API
+    answers, so the pod only turns ready once sign-in works."""
+    global PASSWORD, _KEY
+    while ENABLED:
+        try:
+            try:
+                sec = k8s("GET", f"/api/v1/namespaces/{NS}/secrets/{SECRET}")
+            except K8sError as err:
+                if err.code != 404:
+                    raise
+                pw = "".join(secrets.choice("abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(20))
+                try:
+                    k8s("POST", f"/api/v1/namespaces/{NS}/secrets", {
+                        "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                        "metadata": {"name": SECRET, "labels": {"app.kubernetes.io/part-of": "dmobnk"}},
+                        "stringData": {"password": pw}})
+                    print(f"created the {SECRET} Secret with a new admin password", flush=True)
+                except K8sError as err2:
+                    if err2.code != 409:  # 409: another replica made it first
+                        raise
+                sec = k8s("GET", f"/api/v1/namespaces/{NS}/secrets/{SECRET}")
+            PASSWORD = base64.b64decode(sec["data"]["password"]).decode().strip()
+            # Every replica derives the same key from the shared password, so a
+            # session works whichever pod serves the next request.
+            _KEY = hashlib.sha256(b"dmobnk-admin-session:" + PASSWORD.encode()).digest()
+            return
+        except Exception as err:
+            print(f"couldn't load the admin password: {err}", flush=True)
+            time.sleep(5)
 
 
 _cache = {}
@@ -123,8 +171,10 @@ def list_deployments():
 
 
 def hpa():
+    if not HPA_APPS:
+        return None
     try:
-        h = k8s("GET", f"/apis/autoscaling/v2/namespaces/{NS}/horizontalpodautoscalers/rates-svc")
+        h = k8s("GET", f"/apis/autoscaling/v2/namespaces/{NS}/horizontalpodautoscalers/{sorted(HPA_APPS)[0]}")
     except K8sError:
         return None
     cpu = None
@@ -137,6 +187,8 @@ def hpa():
 
 
 def surge_jobs():
+    if not SURGE:
+        return []
     items = k8s("GET", f"/apis/batch/v1/namespaces/{NS}/jobs?labelSelector=app%3Drates-rush")["items"]
     return [j["metadata"]["name"] for j in items if (j.get("status", {}).get("active") or 0) > 0]
 
@@ -163,10 +215,16 @@ def cluster_info():
 
 def state():
     pods = cached("pods", 1.5, list_pods)
-    cron = cached("cron", 10, lambda: k8s("GET", f"/apis/batch/v1/namespaces/{NS}/cronjobs/rates-refresh"))
+    def cron_last():
+        if not CRON:
+            return None
+        try:
+            return k8s("GET", f"/apis/batch/v1/namespaces/{NS}/cronjobs/{CRON}").get("status", {}).get("lastSuccessfulTime")
+        except K8sError:
+            return None
     return {"version": cached("version", 3600, cluster_info), "served": {"pod": POD, "node": NODE},
             "pods": pods, "deployments": cached("deps", 1.5, list_deployments), "hpa": cached("hpa", 3, hpa),
-            "cron_last": cron.get("status", {}).get("lastSuccessfulTime"),
+            "cron_last": cached("cron", 10, cron_last),
             "surge": cached("surge", 3, surge_jobs), "events": cached("events", 3, list_events)}
 
 
@@ -223,11 +281,13 @@ def restart(app):
 
 
 def surge():
+    if not SURGE:
+        return 404, {"error": "No traffic surge here."}
     if surge_jobs():
         return 409, {"error": "A surge is already running."}
     name = f"rates-rush-{secrets.token_hex(3)}"
     loop = ("end=$(( $(date +%s) + 90 )); while [ $(date +%s) -lt $end ]; do "
-            "curl -s -o /dev/null -m 5 'http://rates-svc:8080/quote?burn=1'; done")
+            f"curl -s -o /dev/null -m 5 'http://{SURGE}:8080/quote?burn=1'; done")
     k8s("POST", f"/apis/batch/v1/namespaces/{NS}/jobs", {
         "apiVersion": "batch/v1", "kind": "Job",
         "metadata": {"name": name, "labels": {"app": "rates-rush", "app.kubernetes.io/part-of": "dmobnk"}},
@@ -241,7 +301,7 @@ def surge():
                                                                      "limits": {"memory": "32Mi"}}}]}}},
     })
     _forget("surge", "pods")
-    return 200, {"message": f"Surge started ({name}): 4 pods hit rates-svc for 90 s. Watch the autoscaler."}
+    return 200, {"message": f"Surge started ({name}): 4 pods hit {SURGE} for 90 s. Watch the autoscaler."}
 
 
 # ---------------------------------------------------------------- sessions
@@ -291,7 +351,7 @@ def _set_cookie(h, value, max_age):
 def handle(h, method, rest, q):
     """rest is the path after /dmobnk/, e.g. "admin" or "admin/api/state"."""
     sub = rest[len("admin"):].strip("/")
-    signed_in = ENABLED and valid_session(_cookie(h))
+    signed_in = ENABLED and bool(PASSWORD) and valid_session(_cookie(h))
     if method == "GET":
         if sub == "":
             if not signed_in:
@@ -309,7 +369,7 @@ def handle(h, method, rest, q):
     length = int(h.headers.get("Content-Length") or 0)
     raw = h.rfile.read(min(length, 4096)) if length else b""
     if sub == "login":
-        if not ENABLED:
+        if not (ENABLED and PASSWORD):
             return h._send(303, "text/plain", "", {"Location": BASE})
         ip = _client_ip(h)
         if _locked_out(ip):
@@ -467,10 +527,9 @@ def _doc(title, body, js=""):
 
 
 def login_page(error=""):
-    if not ENABLED:
-        inner = ('<p class="muted">The control room is switched off on this cluster. To switch it on, create the '
-                 '<code class="mono">dmobnk-admin</code> Secret with a <code class="mono">password</code> key in the '
-                 '<code class="mono">dmobnk</code> namespace, then restart the web deployment.</p>')
+    if not (ENABLED and PASSWORD):
+        inner = ('<p class="muted">The control room can\'t reach the cluster yet. Try again in a moment; if it '
+                 'keeps happening, check the kube-power pod\'s logs.</p>')
     else:
         msg = {"wrong": "That password isn't right.",
                "locked": "Too many tries. Wait five minutes and try again."}.get(error, "")
@@ -482,18 +541,24 @@ def login_page(error=""):
     body = f"""<main class="login"><form method="post" action="{BASE}/login">
 <div class="brand" style="color:#0b1b3a">{LOGO}<span><b>Kube Power</b><small style="color:#4a5a7d">DMOBNK control room</small></span></div>
 {inner}
-<a href="/dmobnk/" style="font-size:14px">Back to the bank</a>
+<a href="{e(APP_URL)}" style="font-size:14px">Back to {e(APP_NAME)}</a>
 </form></main>"""
     return _doc("Sign in · Kube Power", body)
 
 
 def control_page():
+    SURGE_HTML = (f"""      <div class="act">
+        <div class="ah"><h3>Traffic surge</h3><span>Autoscaling (HPA)</span></div>
+        <p>Four pods hammer {e(SURGE)} for 90 seconds. The autoscaler adds pods when CPU passes its target, then removes them a minute after it calms down.</p>
+        <button type="button" class="btn amber" id="s-go">Start the surge</button>
+      </div>
+""" if SURGE else "")
     body = f"""<header><div class="wrap">
   <a class="brand" href="{BASE}">{LOGO}<span><b>Kube Power</b><small>Break things. Watch Kubernetes fix them.</small></span></a>
   <div class="pills">
     <span class="pill"><span class="dot" id="live-dot"></span><span id="cluster">…</span></span>
     <span class="pill mono" style="font-size:12px" id="served">…</span>
-    <a class="pill" href="/dmobnk/" style="color:#fff;text-decoration:none">Open the bank</a>
+    <a class="pill" href="{e(APP_URL)}" style="color:#fff;text-decoration:none">Open {e(APP_NAME)}</a>
     <form method="post" action="{BASE}/logout" class="pill"><button type="submit">Sign out</button></form>
   </div>
 </div></header>
@@ -501,8 +566,8 @@ def control_page():
   <section class="tiles" aria-label="Namespace health">
     <div class="tile"><span class="k">Pods ready</span><span class="v" id="t-pods">…</span><span class="s" id="t-pods-s"></span></div>
     <div class="tile"><span class="k">Deployments at strength</span><span class="v" id="t-deps">…</span><div class="bar"><span id="t-deps-bar" style="width:0"></span></div></div>
-    <div class="tile"><span class="k">Rates autoscaler</span><span class="v" id="t-hpa">…</span><span class="s" id="t-hpa-s"></span></div>
-    <div class="tile"><span class="k">Rates refreshed</span><span class="v" id="t-cron">…</span><span class="s">by the rates-refresh CronJob</span></div>
+    {f'<div class="tile"><span class="k">Autoscaler · {e(sorted(HPA_APPS)[0])}</span><span class="v" id="t-hpa">…</span><span class="s" id="t-hpa-s"></span></div>' if HPA_APPS else ''}
+    {f'<div class="tile"><span class="k">Last {e(CRON)} run</span><span class="v" id="t-cron">…</span><span class="s">by its CronJob</span></div>' if CRON else ''}
   </section>
   <p class="note" id="note" role="status" aria-live="polite" hidden></p>
   <div class="cols">
@@ -537,18 +602,13 @@ def control_page():
         <div class="ctl"><label for="r-app" class="sr">Deployment to restart</label><select id="r-app"></select>
           <button type="button" class="btn navy" id="r-go">Restart</button></div>
       </div>
-      <div class="act">
-        <div class="ah"><h3>Traffic surge</h3><span>Autoscaling (HPA)</span></div>
-        <p>Four pods hammer rates-svc for 90 seconds. The autoscaler adds pods when CPU passes its target, then removes them a minute after it calms down.</p>
-        <button type="button" class="btn amber" id="s-go">Start the surge</button>
-      </div>
-    </aside>
+{SURGE_HTML}    </aside>
   </div>
   <section class="panel" aria-labelledby="ev-h">
     <div class="headrow"><h2 id="ev-h">What Kubernetes just did</h2><span class="muted" style="font-size:13px">Events in the dmobnk namespace, newest first</span></div>
     <div class="scroll"><table class="ev"><thead><tr><th>Time</th><th>Reason</th><th>Object</th><th>What happened</th></tr></thead><tbody id="events"></tbody></table></div>
   </section>
-  <p class="muted" style="font-size:12px">Controls are limited to the dmobnk namespace. redis isn't offered: it holds the bank's state.</p>
+  <p class="muted" style="font-size:12px">Controls are limited to the dmobnk namespace and these deployments: {e(", ".join(APPS))}. Redis isn't offered: it holds the app's state.</p>
 </main>
 <style>.sr{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}</style>"""
     cfg = json.dumps({"base": BASE, "apps": APPS, "hpa": sorted(HPA_APPS), "min": SCALE_MIN, "max": SCALE_MAX})
@@ -560,7 +620,8 @@ const $ = id => document.getElementById(id);
 const COLORS = {
   'web': ['#0b1b3a', '#fff'], 'accounts-svc': ['#2453ff', '#fff'], 'cards-svc': ['#7c3aed', '#fff'],
   'loans-svc': ['#0e9f6e', '#fff'], 'mortgage-svc': ['#e8890c', '#1d1200'], 'rates-svc': ['#d6336c', '#fff'],
-  'crossborder-svc': ['#0891b2', '#fff'], 'redis': ['#475569', '#fff'], 'job': ['#cbd5e1', '#0b1b3a'],
+  'crossborder-svc': ['#0891b2', '#fff'], 'redis': ['#475569', '#fff'], 'branch-web': ['#2453ff', '#fff'],
+  'branch-redis': ['#475569', '#fff'], 'kube-power': ['#e8890c', '#1d1200'], 'job': ['#cbd5e1', '#0b1b3a'],
   'rates-rush': ['#fca5a5', '#450a0a'], 'other': ['#94a3b8', '#0b1b3a'],
 };
 const color = app => COLORS[app] || COLORS.other;
@@ -618,11 +679,11 @@ function draw(s) {
   const full = s.deployments.filter(d => d.ready >= d.desired && !d.rolling).length;
   $('t-deps').textContent = full + ' / ' + s.deployments.length;
   $('t-deps-bar').style.width = (s.deployments.length ? 100 * full / s.deployments.length : 0) + '%';
-  if (s.hpa) {
+  if (!$('t-hpa')) {} else if (s.hpa) {
     $('t-hpa').textContent = s.hpa.current + (s.hpa.desired !== s.hpa.current ? ' → ' + s.hpa.desired : '') + ' pods';
     $('t-hpa-s').textContent = 'CPU ' + (s.hpa.cpu === null || s.hpa.cpu === undefined ? '—' : s.hpa.cpu + '%') + ' of ' + s.hpa.target + '% target · ' + s.hpa.min + '–' + s.hpa.max + ' pods' + (s.surge.length ? ' · surge running' : '');
   } else { $('t-hpa').textContent = '—'; $('t-hpa-s').textContent = 'no autoscaler found'; }
-  $('t-cron').textContent = ago(s.cron_last);
+  if ($('t-cron')) $('t-cron').textContent = ago(s.cron_last);
 
   const apps = [...new Set(s.pods.map(p => p.app))];
   $('legend').replaceChildren(...apps.map(a => { const sp = el('span'); const i = el('i'); i.style.background = color(a)[0]; sp.append(i, document.createTextNode(a)); return sp; }));
@@ -661,8 +722,7 @@ function draw(s) {
     tr.append(el('td', '', clock(ev.t)), r, el('td', '', ev.obj), el('td', '', ev.msg + (ev.count > 1 ? ' (×' + ev.count + ')' : '')));
     return tr;
   }));
-  $('s-go').textContent = s.surge.length ? 'Surge running…' : 'Start the surge';
-  $('s-go').dataset.busy = s.surge.length ? '1' : '';
+  if ($('s-go')) { $('s-go').textContent = s.surge.length ? 'Surge running…' : 'Start the surge'; $('s-go').dataset.busy = s.surge.length ? '1' : ''; }
 
   DEPS = s.deployments; fillSelects(s.deployments); syncScale(s.deployments);
 }
@@ -686,6 +746,6 @@ $('sc-app').onchange = () => { lastScaleApp = null; syncScale(DEPS); };
 $('sc-go').onclick = action($('sc-go'), 'scale', () => ({app: $('sc-app').value, replicas: clamp(+$('sc-n').value)}));
 $('k-go').onclick = action($('k-go'), 'kill', () => ({app: $('k-app').value}));
 $('r-go').onclick = action($('r-go'), 'restart', () => ({app: $('r-app').value}));
-$('s-go').onclick = action($('s-go'), 'surge', () => ({}));
+if ($('s-go')) $('s-go').onclick = action($('s-go'), 'surge', () => ({}));
 tick(); setInterval(tick, 2000);
 """
