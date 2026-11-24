@@ -1,5 +1,6 @@
 # One ConfigMap per country: language, currency format and all the page
-# text: the online bank's under "t", the branch app's under "b". Both apps
+# text: the online bank's under "t", the branch kiosk's under "b", and the
+# kiosk's demo customers, limits and opening hours under "kiosk". Both apps
 # mount locale-uk; the overlays in ../countries/ and ../branch/countries/
 # switch to another one (Fleet picks the overlay from the cluster's labels,
 # see ../fleet.yaml).
@@ -143,86 +144,266 @@ data:
         "view_card": "Manage card →"
       },
       "b": {
-        "branch_name": "London Bridge branch",
-        "title": "Branch counter",
-        "nav_kiosk": "Take a ticket",
-        "nav_board": "Queue board",
-        "nav_teller": "Teller",
-        "kiosk_h": "Welcome. What can we help you with today?",
-        "kiosk_lede": "Take a ticket and we'll call you to a counter.",
+        "title": "Self-service",
+        "welcome_h": "Welcome to {branch}",
+        "welcome_lede": "Do your everyday banking here, whenever we're open.",
+        "use_card": "Use my card",
+        "use_card_d": "Balance, cash, transfers and bills.",
+        "ticket": "Take a queue ticket",
+        "ticket_d": "See someone at the counter today.",
+        "book": "Book an appointment",
+        "book_d": "Meet an adviser at a time that suits you.",
+        "hours": "Opening hours",
+        "hours_d": "When this branch is open.",
+        "now_serving": "Now serving {no}",
+        "waiting": "{n} waiting",
+        "no_queue": "No queue right now",
+        "back": "Back",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "done": "Done",
+        "finish": "Finish and take your card",
+        "card_h": "Insert your card",
+        "card_d": "This is a demo: tap one of the cards below.",
+        "pin_h": "Enter your PIN",
+        "pin_hint": "Demo PIN: 1234",
+        "pin_bad": "That PIN isn't right. Tries left: {n}.",
+        "pin_locked": "Too many wrong PINs. Please take your card and try again in a minute.",
+        "clear": "Clear",
+        "ok": "OK",
+        "hello": "Hello, {name}",
+        "menu_h": "What would you like to do?",
+        "m_balance": "Balance and statement",
+        "m_withdraw": "Withdraw cash",
+        "m_deposit": "Pay in cash",
+        "m_transfer": "Transfer between accounts",
+        "m_bill": "Pay a bill",
+        "balance": "Balance",
+        "recent": "Recent transactions",
+        "no_tx": "No transactions yet.",
+        "print": "Print mini statement",
+        "account": "Account",
+        "amount": "Amount",
+        "other": "Other amount",
+        "from": "From",
+        "to": "To",
+        "payee": "Pay to",
+        "withdraw_h": "Withdraw cash",
+        "deposit_h": "Pay in cash",
+        "deposit_d": "Enter how much you're paying in. (Demo: no real notes needed.)",
+        "transfer_h": "Transfer between accounts",
+        "bill_h": "Pay a bill",
+        "err_funds": "There isn't enough money in that account.",
+        "err_limit": "That's over today's cash limit of {limit}.",
+        "err_cash": "This machine can't pay out that much right now. Try a smaller amount or see a cashier.",
+        "err_amount": "Enter an amount between {min} and {max}.",
+        "err_notes": "Cash comes in multiples of {n}.",
+        "err_same": "Choose two different accounts.",
+        "receipt": "Receipt",
+        "r_ref": "Reference",
+        "r_time": "Time",
+        "r_new": "New balance",
+        "r_thanks": "Thank you for banking with DMOBNK.",
+        "take_receipt": "Take your receipt",
+        "tx_withdraw": "Cash withdrawal",
+        "tx_deposit": "Cash paid in",
+        "tx_out": "Transfer to {acct}",
+        "tx_in": "Transfer from {acct}",
+        "tx_bill": "Bill payment: {payee}",
+        "ticket_h": "What do you need help with?",
         "svc_A": "Cash and cheques",
-        "svc_A_d": "Pay in, take out or change money.",
+        "svc_A_d": "Larger amounts, cheques or foreign currency.",
         "svc_B": "Accounts and cards",
         "svc_B_d": "Open an account, replace a card or update your details.",
         "svc_C": "Mortgages and loans",
         "svc_C_d": "Talk to one of our advisers.",
         "your_ticket": "Your ticket",
         "ahead": "{n} ahead of you · about {min} min",
-        "ahead_none": "You're next. Please watch the screen.",
-        "done": "Done",
-        "board_h": "Now serving",
-        "counter": "Counter {n}",
-        "free": "Free",
-        "waiting": "Waiting",
-        "none_waiting": "No one is waiting.",
-        "recent": "Just called",
-        "teller_h": "Teller",
-        "your_counter": "Your counter",
-        "call_next": "Call next customer",
-        "serving": "Serving",
-        "finish": "Finish",
-        "nobody": "No customer at this counter.",
-        "queue_empty": "The queue is empty.",
-        "cash_h": "Branch cash",
-        "cash_low": "Cash is running low. Order a delivery.",
-        "tx_h": "Counter transaction",
-        "tx_in": "Pay in",
-        "tx_out": "Withdraw",
-        "tx_amount": "Amount",
-        "tx_account": "Account ending",
-        "tx_go": "Record",
-        "tx_bad": "Enter an amount and the last 4 digits of the account.",
-        "tx_nocash": "There isn't enough cash in the branch for that.",
-        "tx_none": "No transactions yet today.",
-        "tx_done": "Recorded.",
-        "served": "Served today",
-        "avg_wait": "Average wait",
-        "min": "min",
-        "appts_h": "Appointments today",
-        "check_in": "Check in",
-        "checked_in": "Checked in",
-        "ledger_h": "Today's transactions",
-        "staff_note": "Staff screen. All customers and figures are examples.",
-        "error": "Something went wrong. Please try again."
+        "ahead_none": "You're next. Please take a seat.",
+        "book_h": "Book an appointment",
+        "topic": "What's it about?",
+        "day": "Which day?",
+        "time": "Which time?",
+        "name": "Your first name",
+        "today": "Today",
+        "tomorrow": "Tomorrow",
+        "no_slots": "No times left that day.",
+        "book_go": "Book it",
+        "err_name": "Please enter a first name.",
+        "booked_h": "You're booked in",
+        "booked_d": "{topic}, {day} at {time}. Please arrive a few minutes early.",
+        "slot_gone": "Sorry, that time has just been taken.",
+        "hours_h": "Opening hours",
+        "closed": "Closed",
+        "open_now": "Open now",
+        "closed_now": "Closed now",
+        "idle_h": "Are you still there?",
+        "idle_d": "For your security, we'll finish in {s} seconds.",
+        "still_here": "I'm still here",
+        "bye": "Please take your card. Goodbye!",
+        "error": "Something went wrong. Please try again.",
+        "branch_name": "London Bridge branch"
       },
-      "branch_appts": [
-        [
-          "09:30",
-          "Priya Shah",
-          "Mortgage review"
+      "branch_cash_start": 50000,
+      "kiosk": {
+        "note": 10,
+        "presets": [
+          20,
+          50,
+          100,
+          200
         ],
-        [
-          "10:15",
-          "Tom Hughes",
-          "Open a current account"
+        "limit": 500,
+        "max": 10000,
+        "customers": [
+          {
+            "id": "c1",
+            "name": "Priya Shah",
+            "last4": "4821",
+            "color": "#0b1b3a",
+            "accounts": [
+              {
+                "id": "c1-cur",
+                "name": "Current account",
+                "balance": 1840
+              },
+              {
+                "id": "c1-sav",
+                "name": "Easy access saver",
+                "balance": 5200
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Thames Water"
+              },
+              {
+                "id": "p2",
+                "name": "British Gas"
+              },
+              {
+                "id": "p3",
+                "name": "Council Tax"
+              }
+            ]
+          },
+          {
+            "id": "c2",
+            "name": "Tom Hughes",
+            "last4": "1907",
+            "color": "#2453ff",
+            "accounts": [
+              {
+                "id": "c2-cur",
+                "name": "Current account",
+                "balance": 612
+              },
+              {
+                "id": "c2-sav",
+                "name": "Easy access saver",
+                "balance": 1250
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "EE Mobile"
+              },
+              {
+                "id": "p2",
+                "name": "Octopus Energy"
+              },
+              {
+                "id": "p3",
+                "name": "TV Licence"
+              }
+            ]
+          },
+          {
+            "id": "c3",
+            "name": "Grace Okafor",
+            "last4": "3366",
+            "color": "#b0650a",
+            "accounts": [
+              {
+                "id": "c3-cur",
+                "name": "Current account",
+                "balance": 3275
+              },
+              {
+                "id": "c3-sav",
+                "name": "Easy access saver",
+                "balance": 12800
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Southern Water"
+              },
+              {
+                "id": "p2",
+                "name": "BT Broadband"
+              },
+              {
+                "id": "p3",
+                "name": "Council Tax"
+              }
+            ]
+          }
         ],
-        [
-          "11:00",
-          "Grace Okafor",
-          "Savings advice"
+        "seed_tx": [
+          "Tesco",
+          "Pret A Manger",
+          "TfL travel",
+          "Amazon",
+          "Boots"
         ],
-        [
-          "13:45",
-          "Daniel Price",
-          "Replace a lost card"
+        "hours": [
+          [
+            "Monday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Tuesday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Wednesday",
+            "09:30",
+            "17:00"
+          ],
+          [
+            "Thursday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Friday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Saturday",
+            "09:00",
+            "13:00"
+          ],
+          [
+            "Sunday",
+            null,
+            null
+          ]
         ],
-        [
-          "15:00",
-          "Aisha Rahman",
-          "Business account"
+        "topics": [
+          "Mortgages",
+          "Savings and investments",
+          "Open an account",
+          "Business banking"
         ]
-      ],
-      "branch_cash_start": 50000
+      }
     }
 ---
 apiVersion: v1
@@ -364,86 +545,266 @@ data:
         "view_card": "Manage card →"
       },
       "b": {
-        "branch_name": "Midtown branch",
-        "title": "Branch counter",
-        "nav_kiosk": "Take a ticket",
-        "nav_board": "Queue board",
-        "nav_teller": "Teller",
-        "kiosk_h": "Welcome! How can we help you today?",
-        "kiosk_lede": "Take a ticket and we'll call you to a window.",
+        "title": "Self-service",
+        "welcome_h": "Welcome to {branch}",
+        "welcome_lede": "Do your everyday banking here, any time we're open.",
+        "use_card": "Use my card",
+        "use_card_d": "Balance, cash, transfers and bills.",
+        "ticket": "Take a queue ticket",
+        "ticket_d": "See someone at the counter today.",
+        "book": "Book an appointment",
+        "book_d": "Meet an adviser at a time that suits you.",
+        "hours": "Opening hours",
+        "hours_d": "When this branch is open.",
+        "now_serving": "Now serving {no}",
+        "waiting": "{n} waiting",
+        "no_queue": "No queue right now",
+        "back": "Back",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "done": "Done",
+        "finish": "Finish and take your card",
+        "card_h": "Insert your card",
+        "card_d": "This is a demo: tap one of the cards below.",
+        "pin_h": "Enter your PIN",
+        "pin_hint": "Demo PIN: 1234",
+        "pin_bad": "That PIN isn't right. Tries left: {n}.",
+        "pin_locked": "Too many wrong PINs. Please take your card and try again in a minute.",
+        "clear": "Clear",
+        "ok": "OK",
+        "hello": "Hello, {name}",
+        "menu_h": "What would you like to do?",
+        "m_balance": "Balance and statement",
+        "m_withdraw": "Withdraw cash",
+        "m_deposit": "Pay in cash",
+        "m_transfer": "Transfer between accounts",
+        "m_bill": "Pay a bill",
+        "balance": "Balance",
+        "recent": "Recent transactions",
+        "no_tx": "No transactions yet.",
+        "print": "Print mini statement",
+        "account": "Account",
+        "amount": "Amount",
+        "other": "Other amount",
+        "from": "From",
+        "to": "To",
+        "payee": "Pay to",
+        "withdraw_h": "Withdraw cash",
+        "deposit_h": "Pay in cash",
+        "deposit_d": "Enter how much you're paying in. (Demo: no real notes needed.)",
+        "transfer_h": "Transfer between accounts",
+        "bill_h": "Pay a bill",
+        "err_funds": "There isn't enough money in that account.",
+        "err_limit": "That's over today's cash limit of {limit}.",
+        "err_cash": "This ATM can't dispense that much right now. Try a smaller amount or see a teller.",
+        "err_amount": "Enter an amount between {min} and {max}.",
+        "err_notes": "Cash comes in multiples of {n}.",
+        "err_same": "Choose two different accounts.",
+        "receipt": "Receipt",
+        "r_ref": "Reference",
+        "r_time": "Time",
+        "r_new": "New balance",
+        "r_thanks": "Thank you for banking with DMOBNK.",
+        "take_receipt": "Take your receipt",
+        "tx_withdraw": "Cash withdrawal",
+        "tx_deposit": "Cash paid in",
+        "tx_out": "Transfer to {acct}",
+        "tx_in": "Transfer from {acct}",
+        "tx_bill": "Bill payment: {payee}",
+        "ticket_h": "What do you need help with?",
         "svc_A": "Cash and checks",
-        "svc_A_d": "Make a deposit, withdraw cash or exchange currency.",
+        "svc_A_d": "Larger amounts, checks or foreign currency.",
         "svc_B": "Accounts and cards",
         "svc_B_d": "Open an account, replace a card or update your information.",
         "svc_C": "Mortgages and loans",
         "svc_C_d": "Meet with one of our bankers.",
         "your_ticket": "Your ticket",
         "ahead": "{n} ahead of you · about {min} min",
-        "ahead_none": "You're next. Please watch the screen.",
-        "done": "Done",
-        "board_h": "Now serving",
-        "counter": "Window {n}",
-        "free": "Open",
-        "waiting": "Waiting",
-        "none_waiting": "No one is waiting.",
-        "recent": "Just called",
-        "teller_h": "Teller",
-        "your_counter": "Your window",
-        "call_next": "Call next customer",
-        "serving": "Serving",
-        "finish": "Finish",
-        "nobody": "No customer at this window.",
-        "queue_empty": "The line is empty.",
-        "cash_h": "Branch cash",
-        "cash_low": "Cash is running low. Order a delivery.",
-        "tx_h": "Teller transaction",
-        "tx_in": "Deposit",
-        "tx_out": "Withdraw",
-        "tx_amount": "Amount",
-        "tx_account": "Account ending in",
-        "tx_go": "Record",
-        "tx_bad": "Enter an amount and the last 4 digits of the account.",
-        "tx_nocash": "There isn't enough cash in the branch for that.",
-        "tx_none": "No transactions yet today.",
-        "tx_done": "Recorded.",
-        "served": "Served today",
-        "avg_wait": "Average wait",
-        "min": "min",
-        "appts_h": "Today's appointments",
-        "check_in": "Check in",
-        "checked_in": "Checked in",
-        "ledger_h": "Today's transactions",
-        "staff_note": "Staff screen. All customers and figures are examples.",
-        "error": "Something went wrong. Please try again."
+        "ahead_none": "You're next. Please have a seat.",
+        "book_h": "Book an appointment",
+        "topic": "What's it about?",
+        "day": "Which day?",
+        "time": "Which time?",
+        "name": "Your first name",
+        "today": "Today",
+        "tomorrow": "Tomorrow",
+        "no_slots": "No times left that day.",
+        "book_go": "Book it",
+        "err_name": "Please enter a first name.",
+        "booked_h": "You're booked in",
+        "booked_d": "{topic}, {day} at {time}. Please arrive a few minutes early.",
+        "slot_gone": "Sorry, that time has just been taken.",
+        "hours_h": "Opening hours",
+        "closed": "Closed",
+        "open_now": "Open now",
+        "closed_now": "Closed now",
+        "idle_h": "Are you still there?",
+        "idle_d": "For your security, we'll finish in {s} seconds.",
+        "still_here": "I'm still here",
+        "bye": "Please take your card. Goodbye!",
+        "error": "Something went wrong. Please try again.",
+        "branch_name": "Midtown branch"
       },
-      "branch_appts": [
-        [
-          "09:30",
-          "Maria Lopez",
-          "Mortgage review"
+      "branch_cash_start": 60000,
+      "kiosk": {
+        "note": 20,
+        "presets": [
+          20,
+          60,
+          100,
+          200
         ],
-        [
-          "10:15",
-          "Jake Miller",
-          "Open a checking account"
+        "limit": 800,
+        "max": 10000,
+        "customers": [
+          {
+            "id": "c1",
+            "name": "Maria Lopez",
+            "last4": "4821",
+            "color": "#0b1b3a",
+            "accounts": [
+              {
+                "id": "c1-cur",
+                "name": "Checking account",
+                "balance": 2350
+              },
+              {
+                "id": "c1-sav",
+                "name": "Savings account",
+                "balance": 6400
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "ConEd"
+              },
+              {
+                "id": "p2",
+                "name": "Verizon"
+              },
+              {
+                "id": "p3",
+                "name": "Spectrum"
+              }
+            ]
+          },
+          {
+            "id": "c2",
+            "name": "Jake Miller",
+            "last4": "1907",
+            "color": "#2453ff",
+            "accounts": [
+              {
+                "id": "c2-cur",
+                "name": "Checking account",
+                "balance": 780
+              },
+              {
+                "id": "c2-sav",
+                "name": "Savings account",
+                "balance": 1500
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "PG&E"
+              },
+              {
+                "id": "p2",
+                "name": "AT&T"
+              },
+              {
+                "id": "p3",
+                "name": "Comcast Xfinity"
+              }
+            ]
+          },
+          {
+            "id": "c3",
+            "name": "Keisha Brown",
+            "last4": "3366",
+            "color": "#b0650a",
+            "accounts": [
+              {
+                "id": "c3-cur",
+                "name": "Checking account",
+                "balance": 4120
+              },
+              {
+                "id": "c3-sav",
+                "name": "Savings account",
+                "balance": 15300
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Duke Energy"
+              },
+              {
+                "id": "p2",
+                "name": "T-Mobile"
+              },
+              {
+                "id": "p3",
+                "name": "City Water"
+              }
+            ]
+          }
         ],
-        [
-          "11:00",
-          "Keisha Brown",
-          "Savings advice"
+        "seed_tx": [
+          "Whole Foods",
+          "Starbucks",
+          "MTA",
+          "Amazon",
+          "CVS"
         ],
-        [
-          "13:45",
-          "Ethan Park",
-          "Replace a lost card"
+        "hours": [
+          [
+            "Monday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Tuesday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Wednesday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Thursday",
+            "09:00",
+            "18:00"
+          ],
+          [
+            "Friday",
+            "09:00",
+            "18:00"
+          ],
+          [
+            "Saturday",
+            "09:00",
+            "13:00"
+          ],
+          [
+            "Sunday",
+            null,
+            null
+          ]
         ],
-        [
-          "15:00",
-          "Olivia Chen",
-          "Business account"
+        "topics": [
+          "Mortgages",
+          "Savings and investments",
+          "Open an account",
+          "Small business"
         ]
-      ],
-      "branch_cash_start": 60000
+      }
     }
 ---
 apiVersion: v1
@@ -585,86 +946,266 @@ data:
         "view_card": "Karte verwalten →"
       },
       "b": {
-        "branch_name": "Filiale Frankfurt",
-        "title": "Filialschalter",
-        "nav_kiosk": "Nummer ziehen",
-        "nav_board": "Aufrufanzeige",
-        "nav_teller": "Schalter",
-        "kiosk_h": "Willkommen! Wobei können wir Ihnen heute helfen?",
-        "kiosk_lede": "Ziehen Sie eine Nummer, wir rufen Sie an einen Schalter.",
+        "title": "Selbstbedienung",
+        "welcome_h": "Willkommen in der {branch}",
+        "welcome_lede": "Erledigen Sie Ihre Bankgeschäfte hier, solange wir geöffnet haben.",
+        "use_card": "Mit meiner Karte",
+        "use_card_d": "Kontostand, Bargeld, Überweisungen und Rechnungen.",
+        "ticket": "Wartenummer ziehen",
+        "ticket_d": "Heute am Schalter beraten werden.",
+        "book": "Termin vereinbaren",
+        "book_d": "Beratung zu einer Zeit, die Ihnen passt.",
+        "hours": "Öffnungszeiten",
+        "hours_d": "Wann diese Filiale geöffnet ist.",
+        "now_serving": "Aufgerufen: {no}",
+        "waiting": "{n} wartend",
+        "no_queue": "Gerade keine Warteschlange",
+        "back": "Zurück",
+        "cancel": "Abbrechen",
+        "confirm": "Bestätigen",
+        "done": "Fertig",
+        "finish": "Beenden und Karte entnehmen",
+        "card_h": "Karte einstecken",
+        "card_d": "Dies ist eine Demo: Tippen Sie auf eine der Karten.",
+        "pin_h": "PIN eingeben",
+        "pin_hint": "Demo-PIN: 1234",
+        "pin_bad": "Die PIN ist falsch. Verbleibende Versuche: {n}.",
+        "pin_locked": "Zu viele falsche PINs. Bitte entnehmen Sie Ihre Karte und versuchen Sie es in einer Minute erneut.",
+        "clear": "Löschen",
+        "ok": "OK",
+        "hello": "Hallo, {name}",
+        "menu_h": "Was möchten Sie tun?",
+        "m_balance": "Kontostand und Auszug",
+        "m_withdraw": "Bargeld abheben",
+        "m_deposit": "Bargeld einzahlen",
+        "m_transfer": "Umbuchung zwischen Konten",
+        "m_bill": "Rechnung bezahlen",
+        "balance": "Kontostand",
+        "recent": "Letzte Umsätze",
+        "no_tx": "Noch keine Umsätze.",
+        "print": "Kontoauszug drucken",
+        "account": "Konto",
+        "amount": "Betrag",
+        "other": "Anderer Betrag",
+        "from": "Von",
+        "to": "Nach",
+        "payee": "Empfänger",
+        "withdraw_h": "Bargeld abheben",
+        "deposit_h": "Bargeld einzahlen",
+        "deposit_d": "Geben Sie den Betrag ein, den Sie einzahlen. (Demo: keine echten Scheine nötig.)",
+        "transfer_h": "Umbuchung zwischen Konten",
+        "bill_h": "Rechnung bezahlen",
+        "err_funds": "Auf diesem Konto ist nicht genug Geld.",
+        "err_limit": "Das übersteigt Ihr heutiges Bargeldlimit von {limit}.",
+        "err_cash": "Dieser Automat kann gerade nicht so viel auszahlen. Bitte einen kleineren Betrag wählen oder an den Schalter gehen.",
+        "err_amount": "Bitte einen Betrag zwischen {min} und {max} eingeben.",
+        "err_notes": "Bargeld gibt es nur in Vielfachen von {n}.",
+        "err_same": "Bitte zwei verschiedene Konten wählen.",
+        "receipt": "Beleg",
+        "r_ref": "Referenz",
+        "r_time": "Zeit",
+        "r_new": "Neuer Kontostand",
+        "r_thanks": "Danke, dass Sie bei der DMOBNK sind.",
+        "take_receipt": "Beleg entnehmen",
+        "tx_withdraw": "Barauszahlung",
+        "tx_deposit": "Bareinzahlung",
+        "tx_out": "Umbuchung an {acct}",
+        "tx_in": "Umbuchung von {acct}",
+        "tx_bill": "Rechnung: {payee}",
+        "ticket_h": "Wobei brauchen Sie Hilfe?",
         "svc_A": "Bargeld und Schecks",
-        "svc_A_d": "Einzahlen, abheben oder Geld wechseln.",
+        "svc_A_d": "Größere Beträge, Schecks oder Fremdwährung.",
         "svc_B": "Konten und Karten",
         "svc_B_d": "Konto eröffnen, Karte ersetzen oder Daten ändern.",
         "svc_C": "Baufinanzierung und Kredite",
         "svc_C_d": "Sprechen Sie mit unseren Beraterinnen und Beratern.",
         "your_ticket": "Ihre Nummer",
         "ahead": "{n} vor Ihnen · etwa {min} Min.",
-        "ahead_none": "Sie sind als Nächstes dran. Bitte achten Sie auf die Anzeige.",
-        "done": "Fertig",
-        "board_h": "Aufruf",
-        "counter": "Schalter {n}",
-        "free": "Frei",
-        "waiting": "Wartend",
-        "none_waiting": "Niemand wartet.",
-        "recent": "Zuletzt aufgerufen",
-        "teller_h": "Schalter",
-        "your_counter": "Ihr Schalter",
-        "call_next": "Nächste Person aufrufen",
-        "serving": "Im Gespräch",
-        "finish": "Abschließen",
-        "nobody": "Niemand an diesem Schalter.",
-        "queue_empty": "Die Warteschlange ist leer.",
-        "cash_h": "Bargeldbestand",
-        "cash_low": "Bargeld wird knapp. Bitte Lieferung bestellen.",
-        "tx_h": "Schaltervorgang",
-        "tx_in": "Einzahlung",
-        "tx_out": "Auszahlung",
-        "tx_amount": "Betrag",
-        "tx_account": "Konto endet auf",
-        "tx_go": "Buchen",
-        "tx_bad": "Bitte Betrag und die letzten 4 Ziffern des Kontos eingeben.",
-        "tx_nocash": "Dafür ist nicht genug Bargeld in der Filiale.",
-        "tx_none": "Heute noch keine Vorgänge.",
-        "tx_done": "Gebucht.",
-        "served": "Heute bedient",
-        "avg_wait": "Ø Wartezeit",
-        "min": "Min.",
-        "appts_h": "Termine heute",
-        "check_in": "Einchecken",
-        "checked_in": "Eingecheckt",
-        "ledger_h": "Vorgänge heute",
-        "staff_note": "Ansicht für Mitarbeitende. Alle Kundinnen, Kunden und Beträge sind Beispiele.",
-        "error": "Etwas ist schiefgelaufen. Bitte erneut versuchen."
+        "ahead_none": "Sie sind als Nächstes dran. Bitte nehmen Sie Platz.",
+        "book_h": "Termin vereinbaren",
+        "topic": "Worum geht es?",
+        "day": "Welcher Tag?",
+        "time": "Welche Uhrzeit?",
+        "name": "Ihr Vorname",
+        "today": "Heute",
+        "tomorrow": "Morgen",
+        "no_slots": "An diesem Tag ist nichts mehr frei.",
+        "book_go": "Termin buchen",
+        "err_name": "Bitte einen Vornamen eingeben.",
+        "booked_h": "Ihr Termin steht",
+        "booked_d": "{topic}, {day} um {time} Uhr. Bitte kommen Sie ein paar Minuten früher.",
+        "slot_gone": "Diese Uhrzeit wurde leider gerade vergeben.",
+        "hours_h": "Öffnungszeiten",
+        "closed": "Geschlossen",
+        "open_now": "Jetzt geöffnet",
+        "closed_now": "Jetzt geschlossen",
+        "idle_h": "Sind Sie noch da?",
+        "idle_d": "Zu Ihrer Sicherheit beenden wir in {s} Sekunden.",
+        "still_here": "Ich bin noch da",
+        "bye": "Bitte entnehmen Sie Ihre Karte. Auf Wiedersehen!",
+        "error": "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
+        "branch_name": "Filiale Frankfurt"
       },
-      "branch_appts": [
-        [
-          "09:30",
-          "Anna Schneider",
-          "Baufinanzierung"
+      "branch_cash_start": 55000,
+      "kiosk": {
+        "note": 10,
+        "presets": [
+          20,
+          50,
+          100,
+          200
         ],
-        [
-          "10:15",
-          "Lukas Weber",
-          "Girokonto eröffnen"
+        "limit": 1000,
+        "max": 10000,
+        "customers": [
+          {
+            "id": "c1",
+            "name": "Anna Schneider",
+            "last4": "4821",
+            "color": "#0b1b3a",
+            "accounts": [
+              {
+                "id": "c1-cur",
+                "name": "Girokonto",
+                "balance": 2140
+              },
+              {
+                "id": "c1-sav",
+                "name": "Tagesgeld",
+                "balance": 6800
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Stadtwerke"
+              },
+              {
+                "id": "p2",
+                "name": "Telekom"
+              },
+              {
+                "id": "p3",
+                "name": "Rundfunkbeitrag"
+              }
+            ]
+          },
+          {
+            "id": "c2",
+            "name": "Lukas Weber",
+            "last4": "1907",
+            "color": "#2453ff",
+            "accounts": [
+              {
+                "id": "c2-cur",
+                "name": "Girokonto",
+                "balance": 690
+              },
+              {
+                "id": "c2-sav",
+                "name": "Tagesgeld",
+                "balance": 1400
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Vattenfall"
+              },
+              {
+                "id": "p2",
+                "name": "Vodafone"
+              },
+              {
+                "id": "p3",
+                "name": "Hausverwaltung"
+              }
+            ]
+          },
+          {
+            "id": "c3",
+            "name": "Fatma Yilmaz",
+            "last4": "3366",
+            "color": "#b0650a",
+            "accounts": [
+              {
+                "id": "c3-cur",
+                "name": "Girokonto",
+                "balance": 3510
+              },
+              {
+                "id": "c3-sav",
+                "name": "Tagesgeld",
+                "balance": 14200
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "E.ON"
+              },
+              {
+                "id": "p2",
+                "name": "O2"
+              },
+              {
+                "id": "p3",
+                "name": "Stadtwerke"
+              }
+            ]
+          }
         ],
-        [
-          "11:00",
-          "Fatma Yilmaz",
-          "Sparberatung"
+        "seed_tx": [
+          "REWE",
+          "Bäckerei Müller",
+          "DB Fahrkarte",
+          "Amazon",
+          "dm-drogerie"
         ],
-        [
-          "13:45",
-          "Jonas Fischer",
-          "Karte verloren"
+        "hours": [
+          [
+            "Montag",
+            "09:00",
+            "16:00"
+          ],
+          [
+            "Dienstag",
+            "09:00",
+            "18:00"
+          ],
+          [
+            "Mittwoch",
+            "09:00",
+            "13:00"
+          ],
+          [
+            "Donnerstag",
+            "09:00",
+            "18:00"
+          ],
+          [
+            "Freitag",
+            "09:00",
+            "16:00"
+          ],
+          [
+            "Samstag",
+            null,
+            null
+          ],
+          [
+            "Sonntag",
+            null,
+            null
+          ]
         ],
-        [
-          "15:00",
-          "Sophie Wagner",
-          "Geschäftskonto"
+        "topics": [
+          "Baufinanzierung",
+          "Sparen und Anlegen",
+          "Konto eröffnen",
+          "Geschäftskunden"
         ]
-      ],
-      "branch_cash_start": 55000
+      }
     }
 ---
 apiVersion: v1
@@ -806,84 +1347,264 @@ data:
         "view_card": "Manaja carda →"
       },
       "b": {
-        "branch_name": "Willow Creek bankaboo",
-        "title": "Bankaboo countra",
-        "nav_kiosk": "Ticketa",
-        "nav_board": "Queuebo",
-        "nav_teller": "Tellaboo",
-        "kiosk_h": "Sul sul! Wat yoo needa toodai?",
-        "kiosk_lede": "Grabba ticketa an' we calla yoo to countra.",
+        "title": "Selfie-bankaboo",
+        "welcome_h": "Sul sul! Welcomba to {branch}",
+        "welcome_lede": "Do yoo bankaboo here, wenna we open. Vadish!",
+        "use_card": "Usa my cardaboo",
+        "use_card_d": "Balanza, simoleons, transfa an' billies.",
+        "ticket": "Grabba ticketa",
+        "ticket_d": "Seeba somebobo at countra toodai.",
+        "book": "Booka appointia",
+        "book_d": "Chatta wif advisaboo wenna yoo like.",
+        "hours": "Open-open timez",
+        "hours_d": "Wenna dis bankaboo open.",
+        "now_serving": "Noo servin' {no}",
+        "waiting": "{n} waitaboo",
+        "no_queue": "No queuebo noo",
+        "back": "Backa",
+        "cancel": "Nooboo",
+        "confirm": "Yebba",
+        "done": "Dag dag",
+        "finish": "Finisha an' takka cardaboo",
+        "card_h": "Putta yoo cardaboo",
+        "card_d": "Demo onlee: tappa one o' da cardas.",
+        "pin_h": "Putta yoo PIN",
+        "pin_hint": "Demo PIN: 1234",
+        "pin_bad": "PIN no gooba. {n} triez left.",
+        "pin_locked": "Too many baddie PINs! Takka cardaboo, try again inna minute.",
+        "clear": "Wipa",
+        "ok": "Oka",
+        "hello": "Sul sul, {name}!",
+        "menu_h": "Wat yoo wanna do?",
+        "m_balance": "Balanza an' statementa",
+        "m_withdraw": "Takka simoleons",
+        "m_deposit": "Payza in simoleons",
+        "m_transfer": "Transfa 'tween accountias",
+        "m_bill": "Payza billie",
+        "balance": "Balanza",
+        "recent": "Toodai transactias",
+        "no_tx": "No transactias yet.",
+        "print": "Printa mini statementa",
+        "account": "Accountia",
+        "amount": "Amounta",
+        "other": "Udda amounta",
+        "from": "Froma",
+        "to": "Toowa",
+        "payee": "Payza to",
+        "withdraw_h": "Takka simoleons",
+        "deposit_h": "Payza in simoleons",
+        "deposit_d": "Putta how much yoo payza in. (Demo: no real simoleons!)",
+        "transfer_h": "Transfa 'tween accountias",
+        "bill_h": "Payza billie",
+        "err_funds": "No enuff simoleons in dat accountia.",
+        "err_limit": "Ova toodai limita o' {limit}!",
+        "err_cash": "Machiney no can giva dat much noo. Try smolla or seeba tellaboo.",
+        "err_amount": "Putta amounta 'tween {min} an' {max}.",
+        "err_notes": "Simoleons onlee in lumps o' {n}.",
+        "err_same": "Picka two differa accountias.",
+        "receipt": "Receipta",
+        "r_ref": "Refa",
+        "r_time": "Timez",
+        "r_new": "Nooboo balanza",
+        "r_thanks": "Fanks fo' bankaboo wif DMOBNK! Dag dag.",
+        "take_receipt": "Takka receipta",
+        "tx_withdraw": "Simoleons out",
+        "tx_deposit": "Simoleons in",
+        "tx_out": "Transfa to {acct}",
+        "tx_in": "Transfa from {acct}",
+        "tx_bill": "Billie: {payee}",
+        "ticket_h": "Wat yoo needa?",
         "svc_A": "Simoleons an' chequas",
-        "svc_A_d": "Payza in, takka out, swappa monies.",
+        "svc_A_d": "Biggie amountas, chequas, foreigna monies.",
         "svc_B": "Accountias an' cardas",
         "svc_B_d": "Nooboo accountia, nooboo cardaboo, changa detailz.",
         "svc_C": "Hoozagoo an' loanish",
         "svc_C_d": "Chatta wif advisaboo.",
         "your_ticket": "Yoo ticketa",
         "ahead": "{n} befoora yoo · aboot {min} min",
-        "ahead_none": "Yoo nexta! Watcha da screenie.",
-        "done": "Dag dag",
-        "board_h": "Noo servin'",
-        "counter": "Countra {n}",
-        "free": "Freebo",
-        "waiting": "Waitaboo",
-        "none_waiting": "Nobobo waitin'.",
-        "recent": "Jus' calla",
-        "teller_h": "Tellaboo",
-        "your_counter": "Yoo countra",
-        "call_next": "Calla nexta",
-        "serving": "Servin'",
-        "finish": "Finisha",
-        "nobody": "Nobobo at dis countra.",
-        "queue_empty": "Queuebo emptee.",
-        "cash_h": "Bankaboo simoleons",
-        "cash_low": "Simoleons lowlow! Orda delivaboo.",
-        "tx_h": "Countra transactia",
-        "tx_in": "Payza in",
-        "tx_out": "Takka out",
-        "tx_amount": "Amounta",
-        "tx_account": "Accountia endin'",
-        "tx_go": "Recorda",
-        "tx_bad": "Putta amounta an' 4 diggies o' accountia.",
-        "tx_nocash": "No enuff simoleons in bankaboo.",
-        "tx_none": "No transactias toodai.",
-        "tx_done": "Vadish!",
-        "served": "Served toodai",
-        "avg_wait": "Waitaboo avg",
-        "min": "min",
-        "appts_h": "Appointias toodai",
-        "check_in": "Checka in",
-        "checked_in": "Checka'd",
-        "ledger_h": "Toodai transactias",
-        "staff_note": "Staffa screenie. All Sims an' simoleons ara exampla.",
-        "error": "Oh noes! Trya again."
+        "ahead_none": "Yoo nexta! Sitta down.",
+        "book_h": "Booka appointia",
+        "topic": "Wat aboot?",
+        "day": "Wat day?",
+        "time": "Wat timez?",
+        "name": "Yoo firsta naym",
+        "today": "Toodai",
+        "tomorrow": "Tomorra",
+        "no_slots": "No timez left dat day.",
+        "book_go": "Booka!",
+        "err_name": "Putta firsta naym.",
+        "booked_h": "Yoo booked!",
+        "booked_d": "{topic}, {day} at {time}. Comma lil' early!",
+        "slot_gone": "Oh noes, timez jus' taken.",
+        "hours_h": "Open-open timez",
+        "closed": "Closey",
+        "open_now": "Open noo",
+        "closed_now": "Closey noo",
+        "idle_h": "Yoo still dere?",
+        "idle_d": "Fo' safety, we finisha in {s} seconds.",
+        "still_here": "Me still here!",
+        "bye": "Takka cardaboo. Dag dag!",
+        "error": "Oh noes! Trya again.",
+        "branch_name": "Willow Creek bankaboo"
       },
-      "branch_appts": [
-        [
-          "09:30",
-          "Bella Goth",
-          "Hoozagoo chatta"
+      "branch_cash_start": 80000,
+      "kiosk": {
+        "note": 10,
+        "presets": [
+          50,
+          100,
+          200,
+          500
         ],
-        [
-          "10:15",
-          "Mortimer Goth",
-          "Nooboo accountia"
+        "limit": 2000,
+        "max": 20000,
+        "customers": [
+          {
+            "id": "c1",
+            "name": "Bella Goth",
+            "last4": "4821",
+            "color": "#0b1b3a",
+            "accounts": [
+              {
+                "id": "c1-cur",
+                "name": "Accountia nowsie",
+                "balance": 4200
+              },
+              {
+                "id": "c1-sav",
+                "name": "Savaboo",
+                "balance": 9800
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Watta Werks"
+              },
+              {
+                "id": "p2",
+                "name": "Sparky Powa"
+              },
+              {
+                "id": "p3",
+                "name": "Llama Phone"
+              }
+            ]
+          },
+          {
+            "id": "c2",
+            "name": "Bob Pancakes",
+            "last4": "1907",
+            "color": "#2453ff",
+            "accounts": [
+              {
+                "id": "c2-cur",
+                "name": "Accountia nowsie",
+                "balance": 950
+              },
+              {
+                "id": "c2-sav",
+                "name": "Savaboo",
+                "balance": 2100
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Pizza Plaza"
+              },
+              {
+                "id": "p2",
+                "name": "Watta Werks"
+              },
+              {
+                "id": "p3",
+                "name": "Simlish Cable"
+              }
+            ]
+          },
+          {
+            "id": "c3",
+            "name": "Don Lothario",
+            "last4": "3366",
+            "color": "#b0650a",
+            "accounts": [
+              {
+                "id": "c3-cur",
+                "name": "Accountia nowsie",
+                "balance": 7600
+              },
+              {
+                "id": "c3-sav",
+                "name": "Savaboo",
+                "balance": 25000
+              }
+            ],
+            "payees": [
+              {
+                "id": "p1",
+                "name": "Sparky Powa"
+              },
+              {
+                "id": "p2",
+                "name": "Llama Phone"
+              },
+              {
+                "id": "p3",
+                "name": "Plumbob Rent"
+              }
+            ]
+          }
         ],
-        [
-          "11:00",
-          "Bob Pancakes",
-          "Savaboo advicia"
+        "seed_tx": [
+          "Llamacorp Snax",
+          "Plumbob Pizza",
+          "Simcity Bus",
+          "Amazoo",
+          "Grim's Coffee"
         ],
-        [
-          "13:45",
-          "Eliza Pancakes",
-          "Losta cardaboo"
+        "hours": [
+          [
+            "Moonday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Toozday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Weddaboo",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Thurzy",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Fryday",
+            "09:00",
+            "17:00"
+          ],
+          [
+            "Satty",
+            "10:00",
+            "14:00"
+          ],
+          [
+            "Sunnaboo",
+            null,
+            null
+          ]
         ],
-        [
-          "15:00",
-          "Don Lothario",
-          "Bizniz accountia"
+        "topics": [
+          "Hoozagoo",
+          "Savaboo an' investa",
+          "Nooboo accountia",
+          "Bizniz bankaboo"
         ]
-      ],
-      "branch_cash_start": 80000
+      }
     }

@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The branch counter. Like the online bank, no Namespace here: Fleet or
+# The branch kiosk. Like the online bank, no Namespace here: Fleet or
 # deploy.sh creates `dmobnk`.
 resources:
   - ../../locales

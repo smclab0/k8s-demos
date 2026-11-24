@@ -1,4 +1,4 @@
-# The DMOBNK branch counter: deployed instead of the online bank on clusters
+# The DMOBNK branch kiosk: deployed instead of the online bank on clusters
 # labelled dmobnk.smclab.net/role=branch (see ../../fleet.yaml).
 #
 # Optional per-cluster settings live in a `dmobnk-branch` ConfigMap that
@@ -55,8 +55,8 @@ kind: Service
 metadata: {name: branch-web, namespace: dmobnk}
 spec: {selector: {app: branch-web}, ports: [{port: 80, targetPort: 8080}]}
 ---
-# The queue, counters, branch cash and today's transactions. Nothing here is
-# precious, so no volume: a restart starts the day's queue afresh.
+# The queue, appointments, demo balances and transactions, and the kiosk's
+# cash. Nothing here is precious, so no volume: a restart starts afresh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

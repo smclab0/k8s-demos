@@ -39,17 +39,19 @@ kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base6
 
 A sign-in lasts 8 hours. Five wrong passwords from one address lock it out for 5 minutes. If Fleet's drift correction is on, it will undo scaling done from the control room.
 
-## Branch counter (clusters labelled as a branch)
+## Branch kiosk (clusters labelled as a branch)
 
-A cluster labelled `dmobnk.smclab.net/role=branch` (or just `role=branch`) gets the **branch counter** app *instead of* the online bank: the web app for one high-street branch, running on the branch's own (edge) cluster.
+A cluster labelled `dmobnk.smclab.net/role=branch` (or just `role=branch`) gets the **branch kiosk** *instead of* the online bank: a full-screen, touch-friendly self-service kiosk for one high-street branch, running on the branch's own (edge) cluster. There are no staff screens.
 
-| Screen | Path | For |
-|---|---|---|
-| **Take a ticket** | `/` | Customers: a kiosk to take a queue ticket for cash, accounts or mortgages, with the wait ahead of them. |
-| **Queue board** | `/board` | The "now serving" display: each counter's current ticket and who's waiting. |
-| **Teller** | `/teller` | Staff: call the next customer to your counter, record cash paid in or taken out, see the branch's cash (with a low-cash warning), check in today's appointments and see today's transactions. |
+| Without a card | With a (demo) card and PIN |
+|---|---|
+| **Take a queue ticket** for cash, accounts or mortgages, with the wait ahead. The queue moves on by itself, one ticket every 45 s, as if advisers were serving; the home screen shows who's being served. | **Balance and statement**, with a printed-style mini statement. |
+| **Book an appointment** with an adviser: topic, today or the next two days, a free time and a first name. | **Withdraw cash** (in whole notes, up to a daily limit, and only while the kiosk has the cash) and **pay in cash**. |
+| **Opening hours**, with today highlighted and whether it's open now. | **Transfer** between your own accounts and **pay a bill** to a saved payee. Every transaction prints a receipt. |
 
-It's `branch-web` (`branch/base/branch.py`, 2 replicas) plus its own `branch-redis`, which holds the queue, counters and cash. The branch's language, currency and name follow the cluster's `dmobnk.smclab.net/country` label, the same as the online bank. All customers and figures are examples.
+Tap one of three demo cards and enter PIN `1234` (shown on screen). Three wrong PINs lock that card for a minute, and a signed-in session ends after 45 s without a touch (with a 15 s warning). The demo customers, their accounts and payees, the cash limits and the opening hours are per country, in the `kiosk` section of each `locale-<country>` ConfigMap; balances live in `branch-redis` and start again if it restarts.
+
+It's `branch-web` (`branch/base/branch.py`, 2 replicas) plus `branch-redis`. The language, currency and branch name follow the cluster's `dmobnk.smclab.net/country` label, the same as the online bank. All customers and figures are examples.
 
 **Where it's served.** A kustomize bundle can't read a cluster label's value, so `branch-web` sets its own Ingress (plain HTTP) once it's running:
 - host: `branch.<external address>.sslip.io`. The address is the cluster's **external ingress address** when it has one: what the ingress controller wrote into the Ingress's status, or the `EXTERNAL-IP` of the ingress controller's LoadBalancer Service (any LoadBalancer Service on port 80 or 443). An AWS load balancer publishes a DNS name, which is resolved to an IP. A public address wins. Without one, it falls back to the node: its ExternalIP, then on EC2 the instance's public IP (instance metadata, then `checkip.amazonaws.com`). On-prem with no public address, it uses the load balancer's private address (e.g. MetalLB), else the node's InternalIP. It's checked again every 30 s while it only has a node address, then every 5 minutes.
@@ -67,7 +69,6 @@ kubectl -n dmobnk create configmap dmobnk-branch \
 kubectl -n dmobnk rollout restart deploy/branch-web
 ```
 
-The teller screen has no sign-in: it's for the branch's own network. Don't expose a branch cluster's Ingress to the internet without putting one in front of it.
 
 ## Layout
 
@@ -75,7 +76,7 @@ The teller screen has no sign-in: it's for the branch's own network. Don't expos
 - `common/`: `ingress_host.py`, which both apps use to point their Ingress at the cluster they run on.
 - `sites/dev-smclab/`: lenny-new's `dev.smclab.net` Ingress, as a component plus one overlay per country (used by `deploy.sh`).
 - `locales/`: the four `locale-<country>` ConfigMaps, used by both apps (bank text under `t`, branch text under `b`).
-- `branch/`: the branch counter: `branch/base/` and `branch/countries/<cc>` overlays, laid out like the bank's.
+- `branch/`: the branch kiosk: `branch/base/` and `branch/countries/<cc>` overlays, laid out like the bank's.
 - `kustomization.yaml`: the default, UK deployment (just `base/`).
 - `countries/us`, `countries/de`, `countries/sim`: overlays that switch the web pods to that country's locale.
 - `fleet.yaml`: Fleet settings, including which app and overlay each cluster gets.
@@ -86,7 +87,7 @@ Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Ranc
 
 | Label | App |
 |---|---|
-| `dmobnk.smclab.net/role=branch`, or just `role=branch` | The branch counter (`branch/`) |
+| `dmobnk.smclab.net/role=branch`, or just `role=branch` | The branch kiosk (`branch/`) |
 | no `role` label, or another value | The online bank |
 
 | Label | Language and currency (either app) |
@@ -103,7 +104,7 @@ A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, f
 | App | URL on a Fleet cluster |
 |---|---|
 | Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (control room: `…/dmobnk/admin`) |
-| Branch counter | `http://branch.<external address>.sslip.io/` |
+| Branch kiosk | `http://branch.<external address>.sslip.io/` |
 
 To fix the online bank's host or class instead, create a `dmobnk-site` ConfigMap (keys `host`, `ingressClass`) and restart `deploy/web`. To see what was picked: `kubectl -n dmobnk logs deploy/web | grep -E 'using|ingress'`.
 
@@ -114,7 +115,7 @@ Don't mix Fleet and `deploy.sh` on one cluster: Helm won't adopt resources that 
 ```sh
 kubectl config use-context lenny-new
 ./dmobnk/deploy.sh               # the online bank, UK; or: ./dmobnk/deploy.sh de   (uk | us | de | sim)
-./dmobnk/deploy.sh branch        # the branch counter instead; or: ./dmobnk/deploy.sh branch de
+./dmobnk/deploy.sh branch        # the branch kiosk instead; or: ./dmobnk/deploy.sh branch de
 ```
 
 The script creates the `dmobnk` namespace, applies the chosen overlay, waits for every rollout and seeds the first rates. For the online bank it uses `sites/dev-smclab/<cc>`, which serves it at `https://dev.smclab.net/dmobnk/` (ingress-nginx, cert-manager's `letsencrypt-cloudflare`); run it with `DMOBNK_SITE=auto` for the self-configuring sslip.io Ingress instead. Running it again with another country switches the site.

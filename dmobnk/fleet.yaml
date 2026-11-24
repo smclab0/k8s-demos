@@ -7,7 +7,7 @@
 defaultNamespace: dmobnk
 
 # Two cluster labels in Rancher decide what each cluster gets:
-#   dmobnk.smclab.net/role    = branch  -> the branch counter app (branch/)
+#   dmobnk.smclab.net/role    = branch  -> the branch kiosk (branch/)
 #   (or just role = branch)     instead of the online bank. Any other value,
 #                               or no label: the online bank.
 #   dmobnk.smclab.net/country = uk | us | de | sim -> language and currency.

@@ -3,7 +3,7 @@
 #
 #   dmobnk/deploy.sh [uk|us|de|sim]          the online bank, at
 #                                            https://dev.smclab.net/dmobnk/
-#   dmobnk/deploy.sh branch [uk|us|de|sim]   the branch counter app instead,
+#   dmobnk/deploy.sh branch [uk|us|de|sim]   the branch kiosk instead,
 #                                            at http://branch.<node IP>.sslip.io/
 # The country defaults to uk.
 set -euo pipefail
