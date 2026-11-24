@@ -8,7 +8,7 @@ defaultNamespace: dmobnk
 
 # Two cluster labels in Rancher decide what each cluster gets:
 #   dmobnk.smclab.net/role    = branch  -> the branch counter app (branch/)
-#                               instead of the online bank. Any other value,
+#   (or just role = branch)     instead of the online bank. Any other value,
 #                               or no label: the online bank.
 #   dmobnk.smclab.net/country = uk | us | de | sim -> language and currency.
 #                               No label (or another value): UK.
@@ -30,6 +30,23 @@ targetCustomizations:
   - name: branch
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/role: branch}
+    kustomize: {dir: branch}
+  # The same, for clusters labelled with the short key role=branch.
+  - name: branch-us-short
+    clusterSelector:
+      matchLabels: {role: branch, dmobnk.smclab.net/country: us}
+    kustomize: {dir: branch/countries/us}
+  - name: branch-de-short
+    clusterSelector:
+      matchLabels: {role: branch, dmobnk.smclab.net/country: de}
+    kustomize: {dir: branch/countries/de}
+  - name: branch-sim-short
+    clusterSelector:
+      matchLabels: {role: branch, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: branch/countries/sim}
+  - name: branch-short
+    clusterSelector:
+      matchLabels: {role: branch}
     kustomize: {dir: branch}
   - name: us
     clusterSelector:

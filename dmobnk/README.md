@@ -41,7 +41,7 @@ A sign-in lasts 8 hours. Five wrong passwords from one address lock it out for 5
 
 ## Branch counter (clusters labelled as a branch)
 
-A cluster labelled `dmobnk.smclab.net/role=branch` gets the **branch counter** app *instead of* the online bank: the web app for one high-street branch, running on the branch's own (edge) cluster.
+A cluster labelled `dmobnk.smclab.net/role=branch` (or just `role=branch`) gets the **branch counter** app *instead of* the online bank: the web app for one high-street branch, running on the branch's own (edge) cluster.
 
 | Screen | Path | For |
 |---|---|---|
@@ -86,7 +86,7 @@ Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Ranc
 
 | Label | App |
 |---|---|
-| `dmobnk.smclab.net/role=branch` | The branch counter (`branch/`) |
+| `dmobnk.smclab.net/role=branch`, or just `role=branch` | The branch counter (`branch/`) |
 | no `role` label, or another value | The online bank |
 
 | Label | Language and currency (either app) |
