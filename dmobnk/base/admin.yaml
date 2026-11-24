@@ -1,0 +1,60 @@
+# RBAC for the Kube Power control room (control.py), served by the web pods
+# at /dmobnk/admin to signed-in admins only. Everything is limited to the
+# dmobnk namespace; changes are limited further to the bank's own
+# deployments (not redis) by resourceNames here and by APPS in control.py.
+#
+# The sign-in password lives in the `dmobnk-admin` Secret (key `password`),
+# which is deliberately not in git: deploy.sh creates one, or make it with
+#   kubectl -n dmobnk create secret generic dmobnk-admin --from-literal=password=...
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dmobnk-web
+  namespace: dmobnk
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dmobnk-web
+  namespace: dmobnk
+rules:
+  # Read: the cluster map, deployments table, autoscaler and events.
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["list"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get"]
+  # Kill a pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # Scale out and rolling restart, on the bank's deployments only.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    resourceNames: [web, accounts-svc, cards-svc, loans-svc, mortgage-svc, rates-svc, crossborder-svc]
+    verbs: ["patch"]
+  # Traffic surge: a Job of curl pods aimed at rates-svc.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dmobnk-web
+  namespace: dmobnk
+subjects:
+  - kind: ServiceAccount
+    name: dmobnk-web
+    namespace: dmobnk
+roleRef:
+  kind: Role
+  name: dmobnk-web
+  apiGroup: rbac.authorization.k8s.io

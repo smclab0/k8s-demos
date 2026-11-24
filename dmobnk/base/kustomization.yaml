@@ -10,14 +10,16 @@ resources:
   - web.yaml
   - rates-cron.yaml
   - ingress.yaml
+  - admin.yaml
 
-# web.py lives as a plain file; the generated ConfigMap gets a content hash in
+# web.py and control.py live as plain files; the generated ConfigMap gets a content hash in
 # its name, so editing web.py rolls the web pods automatically.
 configMapGenerator:
   - name: dmobnk-web-script
     namespace: dmobnk
     files:
       - web.py
+      - control.py
 
 labels:
   - pairs:

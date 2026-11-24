@@ -13,10 +13,10 @@ spec:
     metadata:
       labels: {app: web, dmobnk.smclab.net/tier: web}
     spec:
-      # Named explicitly: leaving it out keeps a deleted ServiceAccount on
-      # clusters that once had one (the deprecated serviceAccount field).
-      serviceAccountName: default
-      automountServiceAccountToken: false
+      # dmobnk-web (admin.yaml) lets the Kube Power control room read and
+      # act on the dmobnk namespace. Only signed-in admins can use it.
+      serviceAccountName: dmobnk-web
+      automountServiceAccountToken: true
       topologySpreadConstraints:
         - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: web}}}
       containers:
@@ -24,6 +24,12 @@ spec:
           image: python:3.12-alpine
           command: ["python3", "-u", "/app/web.py"]
           ports: [{containerPort: 8080}]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            # The control room's sign-in password. No Secret, no control room.
+            - name: ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: dmobnk-admin, key: password, optional: true}}
           readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
           resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
           volumeMounts:

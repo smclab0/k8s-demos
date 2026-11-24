@@ -13,10 +13,35 @@ Pages: **Home** (services, your card at a glance, exchange rates, gold price), *
 | `mortgage-svc` | Runs each agreement-in-principle check as a short Job. |
 | `rates-refresh` CronJob | Moves the example rates and gold price every minute. |
 | `redis` | Shared state (card frozen, applications, rates). |
+| `control.py` | **Kube Power**, the admin-only control room at `/dmobnk/admin`, served by the `web` pods. |
+
+## Kube Power control room (admins only)
+
+`https://dev.smclab.net/dmobnk/admin` (or the **Admin** link in the bank's footer) opens the control room after you sign in with the admin password. It shows the `dmobnk` namespace live: pods on each node, the deployments, the rates autoscaler, the rates CronJob and recent events. You can also:
+
+| Control | What it shows |
+|---|---|
+| **Scale out** | Set a deployment's replicas (1 to 6). Not `rates-svc`, which its autoscaler sizes. |
+| **Kill a pod** | Self-healing: a pod is deleted and its ReplicaSet replaces it. It only kills where another ready pod keeps the service up. |
+| **Rolling restart** | Zero-downtime rollout: every pod of a deployment is replaced, a few at a time. |
+| **Traffic surge** | Autoscaling: a Job of 4 curl pods loads `rates-svc` for 90 s, and the HPA adds pods, then removes them. |
+
+`redis` is never offered, since it holds the bank's state. The web pods' `dmobnk-web` Role (`base/admin.yaml`) only covers the `dmobnk` namespace, and it can only change the bank's own deployments.
+
+The password is the `password` key of the `dmobnk-admin` Secret, which isn't kept in git. `deploy.sh` creates one with a random password the first time and prints it. With Fleet, create the Secret yourself (the control room stays switched off until you do):
+
+```sh
+kubectl -n dmobnk create secret generic dmobnk-admin --from-literal=password='choose-one'
+kubectl -n dmobnk rollout restart deploy/web
+# read it back later:
+kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base64 -d
+```
+
+A sign-in lasts 8 hours. Five wrong passwords from one address lock it out for 5 minutes. If Fleet's drift correction is on, it will undo scaling done from the control room.
 
 ## Layout
 
-- `base/`: all the manifests, `web.py` and the four `locale-<country>` ConfigMaps. The web pods mount `locale-uk`.
+- `base/`: all the manifests, `web.py`, `control.py`, the control room's RBAC (`admin.yaml`) and the four `locale-<country>` ConfigMaps. The web pods mount `locale-uk`.
 - `kustomization.yaml`: the default, UK deployment (just `base/`).
 - `countries/us`, `countries/de`, `countries/sim`: overlays that switch the web pods to that country's locale.
 - `fleet.yaml`: Fleet settings, including which overlay each cluster gets.

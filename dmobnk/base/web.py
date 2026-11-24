@@ -9,6 +9,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import control  # Kube Power, the admin-only control room at /dmobnk/admin
+
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 T = L["t"]
 BASE = "/dmobnk/"
@@ -188,7 +190,7 @@ def page(name, title, body, extra_js=""):
   <nav class="links" aria-label="DMOBNK">{nav}</nav>
 </div></header>
 <main class="wrap">{body}</main>
-<footer><div class="wrap"><span>{e(T['footer'])}</span></div></footer>
+<footer><div class="wrap"><span>{e(T['footer'])}</span><a href="{BASE}admin" style="color:#4a5a7d">Admin</a></div></footer>
 <script id="cfg" type="application/json">{cfg_json}</script>
 <script>{COMMON_JS}</script>
 <script>{extra_js}</script>
@@ -491,6 +493,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(302, "text/plain", "", {"Location": BASE})
         if isinstance(rest, tuple):
             return self._send(301, "text/plain", "", {"Location": rest[1]})
+        if rest == "admin" or rest.startswith("admin/"):
+            return control.handle(self, "GET", rest, q)
         try:
             if rest in PAGES:
                 if rest == "" and not urllib.parse.urlsplit(self.path).path.startswith(BASE):
@@ -518,7 +522,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain; charset=utf-8", "not found")
 
     def do_POST(self):
-        rest, _ = self._route()
+        rest, q = self._route()
+        if isinstance(rest, str) and (rest == "admin" or rest.startswith("admin/")):
+            return control.handle(self, "POST", rest, q)
         try:
             if rest == "api/card/freeze":
                 code, res = svc("cards-svc", "/freeze", "POST")
