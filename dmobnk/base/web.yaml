@@ -14,7 +14,8 @@ spec:
       labels: {app: web, dmobnk.smclab.net/tier: web}
     spec:
       # dmobnk-web (admin.yaml) lets the Kube Power control room read and
-      # act on the dmobnk namespace. Only signed-in admins can use it.
+      # act on the dmobnk namespace (only signed-in admins can use it), and
+      # lets the pods point the Ingress at this cluster (ingress.yaml).
       serviceAccountName: dmobnk-web
       automountServiceAccountToken: true
       topologySpreadConstraints:
@@ -27,6 +28,13 @@ spec:
           env:
             - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
             - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            # Optional fixed Ingress host/class (see ingress.yaml).
+            - name: SITE_HOST
+              valueFrom: {configMapKeyRef: {name: dmobnk-site, key: host, optional: true}}
+            - name: INGRESS_CLASS
+              valueFrom: {configMapKeyRef: {name: dmobnk-site, key: ingressClass, optional: true}}
             # The control room's sign-in password. No Secret, no control room.
             - name: ADMIN_PASSWORD
               valueFrom: {secretKeyRef: {name: dmobnk-admin, key: password, optional: true}}
@@ -35,9 +43,12 @@ spec:
           volumeMounts:
             - {name: script, mountPath: /app, readOnly: true}
             - {name: locale, mountPath: /locale, readOnly: true}
+            - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
       volumes:
         - {name: script, configMap: {name: dmobnk-web-script}}
         - {name: locale, configMap: {name: locale-uk}}
+        # Keep lib last: the country overlays patch volumes/1 (locale).
+        - {name: lib, configMap: {name: dmobnk-ingress-host}}
 ---
 apiVersion: v1
 kind: Service

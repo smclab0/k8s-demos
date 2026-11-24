@@ -31,6 +31,7 @@ spec:
             - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
             - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
             - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
             - name: BRANCH_HOST
               valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: host, optional: true}}
             - name: INGRESS_CLASS
@@ -42,9 +43,12 @@ spec:
           volumeMounts:
             - {name: script, mountPath: /app, readOnly: true}
             - {name: locale, mountPath: /locale, readOnly: true}
+            - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
       volumes:
         - {name: script, configMap: {name: dmobnk-branch-script}}
         - {name: locale, configMap: {name: locale-uk}}
+        # Keep lib last: the country overlays patch volumes/1 (locale).
+        - {name: lib, configMap: {name: dmobnk-ingress-host}}
 ---
 apiVersion: v1
 kind: Service
@@ -90,13 +94,17 @@ spec:
     - from: [{podSelector: {matchLabels: {app: branch-web}}}]
       ports: [{port: 6379}]
 ---
-# Plain HTTP on the branch network. The host and class here are placeholders:
-# branch-web sets them once running (ingress_loop in branch.py).
+# Plain HTTP on the branch network. The host here is a placeholder:
+# branch-web sets it (and the class, if the cluster has no default) once
+# running, because of the dmobnk.smclab.net/host annotation
+# (../../common/ingress_host.py).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: branch-web
   namespace: dmobnk
+  annotations:
+    dmobnk.smclab.net/host: auto
 spec:
   rules:
     - host: branch.node-ip.sslip.io

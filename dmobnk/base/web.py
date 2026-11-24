@@ -3,6 +3,8 @@ formats come from the mounted locale ConfigMap: locale-uk by default, or
 another country's via the overlays in ../countries/."""
 import html
 import json
+import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -10,6 +12,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import control  # Kube Power, the admin-only control room at /dmobnk/admin
+
+sys.path.insert(0, "/opt/dmobnk")
+import ingress_host  # noqa: E402  (mounted from the dmobnk-ingress-host ConfigMap)
 
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 T = L["t"]
@@ -540,4 +545,5 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+ingress_host.start("dmobnk", "dmobnk", os.environ.get("SITE_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

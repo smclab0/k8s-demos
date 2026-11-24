@@ -1,0 +1,7 @@
+# The online bank for country "us" on lenny-new: at dev.smclab.net (see ../component).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../countries/us
+components:
+  - ../component

@@ -1,0 +1,10 @@
+# ingress_host.py, shared by the online bank (../base) and the branch
+# counter (../branch/base): it points their Ingress at whatever cluster
+# they're running on. Mounted at /opt/dmobnk in both apps' web pods.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: dmobnk-ingress-host
+    namespace: dmobnk
+    files:
+      - ingress_host.py

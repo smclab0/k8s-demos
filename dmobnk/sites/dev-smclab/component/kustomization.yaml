@@ -1,0 +1,27 @@
+# The lenny-new site: DMOBNK under https://dev.smclab.net/dmobnk/, next to the
+# dev-website Ingress in `apps`, which keeps serving everything else on that
+# host (ingress-nginx merges the two and picks the longest matching path).
+# The overlays next to it (../uk, ../us, ../de, ../sim) add this component;
+# deploy.sh uses them. Fleet clusters never get it.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: {kind: Ingress, name: dmobnk}
+    patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: dmobnk
+        annotations:
+          dmobnk.smclab.net/host: "off"
+          cert-manager.io/cluster-issuer: letsencrypt-cloudflare
+      spec:
+        ingressClassName: nginx
+        tls:
+          - hosts: [dev.smclab.net]
+            secretName: dmobnk-tls
+        rules:
+          - host: dev.smclab.net
+            http:
+              paths:
+                - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}

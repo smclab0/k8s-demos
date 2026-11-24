@@ -280,8 +280,11 @@ def _locked_out(ip):
     return len(recent) >= 5
 
 
-def _set_cookie(value, max_age):
-    return f"{COOKIE}={value}; Path={BASE}; Max-Age={max_age}; HttpOnly; Secure; SameSite=Strict"
+def _set_cookie(h, value, max_age):
+    # Secure only over HTTPS: on a cluster served over plain HTTP (an sslip.io
+    # host) a Secure cookie would never be sent back, so sign-in would loop.
+    https = (h.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip() == "https"
+    return f"{COOKIE}={value}; Path={BASE}; Max-Age={max_age}; HttpOnly;{' Secure;' if https else ''} SameSite=Strict"
 
 
 # ---------------------------------------------------------------- HTTP
@@ -314,12 +317,12 @@ def handle(h, method, rest, q):
         given = urllib.parse.parse_qs(raw.decode("utf-8", "replace")).get("password", [""])[0]
         if hmac.compare_digest(hashlib.sha256(given.encode()).digest(), hashlib.sha256(PASSWORD.encode()).digest()):
             _fails.pop(ip, None)
-            return h._send(303, "text/plain", "", {"Location": BASE, "Set-Cookie": _set_cookie(new_session(), SESSION_S)})
+            return h._send(303, "text/plain", "", {"Location": BASE, "Set-Cookie": _set_cookie(h, new_session(), SESSION_S)})
         _fails.setdefault(ip, []).append(time.time())
         time.sleep(1)
         return h._send(303, "text/plain", "", {"Location": BASE + "?e=wrong"})
     if sub == "logout":
-        return h._send(303, "text/plain", "", {"Location": BASE, "Set-Cookie": _set_cookie("", 0)})
+        return h._send(303, "text/plain", "", {"Location": BASE, "Set-Cookie": _set_cookie(h, "", 0)})
 
     # The actions: signed in, and sent by our own page's fetch (custom header).
     if not signed_in:

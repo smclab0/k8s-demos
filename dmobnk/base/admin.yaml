@@ -58,3 +58,50 @@ roleRef:
   kind: Role
   name: dmobnk-web
   apiGroup: rbac.authorization.k8s.io
+---
+# The web pods point the bank's Ingress at this cluster
+# (../common/ingress_host.py): that one Ingress...
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dmobnk-web-ingress
+  namespace: dmobnk
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["dmobnk"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dmobnk-web-ingress
+  namespace: dmobnk
+subjects:
+  - {kind: ServiceAccount, name: dmobnk-web, namespace: dmobnk}
+roleRef: {kind: Role, name: dmobnk-web-ingress, apiGroup: rbac.authorization.k8s.io}
+---
+# ...and, cluster-wide (read only), its node's address, the ingress
+# controller's LoadBalancer Service and the IngressClasses.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dmobnk-web
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dmobnk-web
+subjects:
+  - {kind: ServiceAccount, name: dmobnk-web, namespace: dmobnk}
+roleRef: {kind: ClusterRole, name: dmobnk-web, apiGroup: rbac.authorization.k8s.io}

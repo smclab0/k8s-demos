@@ -1,20 +1,23 @@
-# DMOBNK lives under dev.smclab.net/dmobnk/. The dev-website Ingress in
-# `apps` keeps serving everything else on that host; ingress-nginx merges
-# the two and picks the longest matching path.
+# Works on any cluster: the web pods point it at this cluster once running
+# (dmobnk.smclab.net/host: auto, see ../common/ingress_host.py), giving
+# http://dmobnk.<cluster external address>.sslip.io/dmobnk/ and the cluster's
+# default IngressClass. The host here is only a placeholder. To fix the host
+# or class, create a `dmobnk-site` ConfigMap (keys: host, ingressClass) and
+# restart deploy/web.
+#
+# lenny-new instead gets dev.smclab.net with TLS from ../sites/dev-smclab,
+# which deploy.sh adds.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: dmobnk
   namespace: dmobnk
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-cloudflare
+    dmobnk.smclab.net/host: auto
 spec:
-  ingressClassName: nginx
-  tls:
-    - hosts: [dev.smclab.net]
-      secretName: dmobnk-tls
   rules:
-    - host: dev.smclab.net
+    - host: dmobnk.node-ip.sslip.io
       http:
         paths:
-          - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+          # "/" rather than "/dmobnk", so the bare host redirects to /dmobnk/.
+          - {path: /, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}

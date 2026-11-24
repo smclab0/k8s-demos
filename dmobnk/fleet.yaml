@@ -47,8 +47,15 @@ targetCustomizations:
 # Fields the apps change on purpose at runtime -- don't report them as drift.
 diff:
   comparePatches:
-    # branch-web points its own Ingress at its node (ingress_loop in
-    # branch/base/branch.py).
+    # The web pods point their Ingress at the cluster they run on
+    # (common/ingress_host.py).
+    - apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      name: dmobnk
+      namespace: dmobnk
+      jsonPointers:
+        - /spec/rules/0/host
+        - /spec/ingressClassName
     - apiVersion: networking.k8s.io/v1
       kind: Ingress
       name: branch-web

@@ -5,6 +5,7 @@ kind: Kustomization
 # deploy.sh creates `dmobnk`.
 resources:
   - ../../locales
+  - ../../common
   - branch.yaml
   - rbac.yaml
 

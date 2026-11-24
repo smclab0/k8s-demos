@@ -1,5 +1,5 @@
 # branch-web points its own Ingress at the cluster's external address (see
-# ingress_loop in branch.py): it may read and patch that one Ingress, list
+# ../../common/ingress_host.py): it may read and patch that one Ingress, list
 # Services to find the ingress controller's LoadBalancer EXTERNAL-IP, read
 # its node's address and see which IngressClasses the cluster has.
 apiVersion: v1

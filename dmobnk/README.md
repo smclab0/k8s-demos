@@ -72,6 +72,8 @@ The teller screen has no sign-in: it's for the branch's own network. Don't expos
 ## Layout
 
 - `base/`: the online bank's manifests, `web.py`, `control.py` and the control room's RBAC (`admin.yaml`). The web pods mount `locale-uk`.
+- `common/`: `ingress_host.py`, which both apps use to point their Ingress at the cluster they run on.
+- `sites/dev-smclab/`: lenny-new's `dev.smclab.net` Ingress, as a component plus one overlay per country (used by `deploy.sh`).
 - `locales/`: the four `locale-<country>` ConfigMaps, used by both apps (bank text under `t`, branch text under `b`).
 - `branch/`: the branch counter: `branch/base/` and `branch/countries/<cc>` overlays, laid out like the bank's.
 - `kustomization.yaml`: the default, UK deployment (just `base/`).
@@ -96,7 +98,14 @@ Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Ranc
 
 Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, branch entries first) and deploys that app and country's overlay. Change a label and Fleet redeploys on its own: adding `role=branch` swaps the online bank for the branch app. `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
 
-For the online bank, the target cluster needs ingress-nginx, cert-manager with the `letsencrypt-cloudflare` ClusterIssuer and metrics-server (for the rates autoscaler); its Ingress host is `dev.smclab.net` on every cluster. A branch cluster only needs an ingress controller (see above).
+A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, for the rates autoscaler, metrics-server. Both apps point their own Ingress at the cluster they land on (`common/ingress_host.py`), using its default IngressClass and an sslip.io host built from the cluster's external address, the same way for both (see *Where it's served* above):
+
+| App | URL on a Fleet cluster |
+|---|---|
+| Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (control room: `…/dmobnk/admin`) |
+| Branch counter | `http://branch.<external address>.sslip.io/` |
+
+To fix the online bank's host or class instead, create a `dmobnk-site` ConfigMap (keys `host`, `ingressClass`) and restart `deploy/web`. To see what was picked: `kubectl -n dmobnk logs deploy/web | grep -E 'using|ingress'`.
 
 Don't mix Fleet and `deploy.sh` on one cluster: Helm won't adopt resources that `deploy.sh` already created. Delete the namespace first (see below), then let Fleet install it.
 
@@ -108,21 +117,21 @@ kubectl config use-context lenny-new
 ./dmobnk/deploy.sh branch        # the branch counter instead; or: ./dmobnk/deploy.sh branch de
 ```
 
-The script creates the `dmobnk` namespace, applies the chosen overlay, waits for every rollout and seeds the first rates. Running it again with another country switches the site.
+The script creates the `dmobnk` namespace, applies the chosen overlay, waits for every rollout and seeds the first rates. For the online bank it uses `sites/dev-smclab/<cc>`, which serves it at `https://dev.smclab.net/dmobnk/` (ingress-nginx, cert-manager's `letsencrypt-cloudflare`); run it with `DMOBNK_SITE=auto` for the self-configuring sslip.io Ingress instead. Running it again with another country switches the site.
 
 Editing `base/web.py` (or `branch/base/branch.py`) changes the ConfigMap's hash name, so the next deploy rolls those pods.
 
 ## Adding a country
 
 1. Add a `locale-<cc>` ConfigMap to `locales/locales.yaml`, with both the `t` (bank) and `b` (branch) text.
-2. Copy `countries/de` to `countries/<cc>`, and `branch/countries/de` to `branch/countries/<cc>`, and change `locale-de` in each.
+2. Copy `countries/de` to `countries/<cc>`, `branch/countries/de` to `branch/countries/<cc>` and `sites/dev-smclab/de` to `sites/dev-smclab/<cc>`, and change `de` in each.
 3. Add matching entries to `targetCustomizations` in `fleet.yaml`: `branch-<cc>` with the branch entries, `<cc>` with the bank's.
 
 ## Remove
 
 ```sh
 kubectl delete namespace dmobnk
-kubectl delete clusterrole,clusterrolebinding dmobnk-branch-web   # if the branch app was deployed
+kubectl delete clusterrole,clusterrolebinding dmobnk-web dmobnk-branch-web
 ```
 
 dev.smclab.net's own site (`apps/dev-website`) is a separate Ingress and is left alone.

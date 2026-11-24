@@ -6,6 +6,7 @@ kind: Kustomization
 resources:
   - redis.yaml
   - ../locales
+  - ../common
   - services.yaml
   - web.yaml
   - rates-cron.yaml
