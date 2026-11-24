@@ -5,7 +5,7 @@ kind: Kustomization
 # own everything in it without fighting over the namespace itself.
 resources:
   - redis.yaml
-  - locales.yaml
+  - ../locales
   - services.yaml
   - web.yaml
   - rates-cron.yaml

@@ -6,11 +6,31 @@
 # creates it when deploying without Fleet).
 defaultNamespace: dmobnk
 
-# Language and currency follow the cluster's label in Rancher:
-#   dmobnk.smclab.net/country = uk | us | de | sim
-# A cluster without the label (or with another value) gets the UK site from
-# ./kustomization.yaml. Changing a label makes Fleet redeploy on its own.
+# Two cluster labels in Rancher decide what each cluster gets:
+#   dmobnk.smclab.net/role    = branch  -> the branch counter app (branch/)
+#                               instead of the online bank. Any other value,
+#                               or no label: the online bank.
+#   dmobnk.smclab.net/country = uk | us | de | sim -> language and currency.
+#                               No label (or another value): UK.
+# Fleet uses the FIRST entry below that matches, so the branch entries come
+# first. Changing a label makes Fleet redeploy on its own.
 targetCustomizations:
+  - name: branch-us
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch, dmobnk.smclab.net/country: us}
+    kustomize: {dir: branch/countries/us}
+  - name: branch-de
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch, dmobnk.smclab.net/country: de}
+    kustomize: {dir: branch/countries/de}
+  - name: branch-sim
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch, dmobnk.smclab.net/country: sim}
+    kustomize: {dir: branch/countries/sim}
+  - name: branch
+    clusterSelector:
+      matchLabels: {dmobnk.smclab.net/role: branch}
+    kustomize: {dir: branch}
   - name: us
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/country: us}
@@ -23,3 +43,16 @@ targetCustomizations:
     clusterSelector:
       matchLabels: {dmobnk.smclab.net/country: sim}
     kustomize: {dir: countries/sim}
+
+# Fields the apps change on purpose at runtime -- don't report them as drift.
+diff:
+  comparePatches:
+    # branch-web points its own Ingress at its node (ingress_loop in
+    # branch/base/branch.py).
+    - apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      name: branch-web
+      namespace: dmobnk
+      jsonPointers:
+        - /spec/rules/0/host
+        - /spec/ingressClassName

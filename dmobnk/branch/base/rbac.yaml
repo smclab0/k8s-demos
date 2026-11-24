@@ -1,0 +1,49 @@
+# branch-web points its own Ingress at its node (see ingress_loop in
+# branch.py): it may read and patch that one Ingress, read its node's
+# address and see which IngressClasses the cluster has.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: branch-web
+  namespace: dmobnk
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: branch-web-ingress
+  namespace: dmobnk
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["branch-web"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: branch-web-ingress
+  namespace: dmobnk
+subjects:
+  - {kind: ServiceAccount, name: branch-web, namespace: dmobnk}
+roleRef: {kind: Role, name: branch-web-ingress, apiGroup: rbac.authorization.k8s.io}
+---
+# Nodes and IngressClasses are cluster-scoped, so these need a ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dmobnk-branch-web
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dmobnk-branch-web
+subjects:
+  - {kind: ServiceAccount, name: branch-web, namespace: dmobnk}
+roleRef: {kind: ClusterRole, name: dmobnk-branch-web, apiGroup: rbac.authorization.k8s.io}

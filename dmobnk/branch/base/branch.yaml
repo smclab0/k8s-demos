@@ -1,0 +1,105 @@
+# The DMOBNK branch counter: deployed instead of the online bank on clusters
+# labelled dmobnk.smclab.net/role=branch (see ../../fleet.yaml).
+#
+# Optional per-cluster settings live in a `dmobnk-branch` ConfigMap that
+# isn't in git (create it with kubectl, then restart branch-web):
+#   host          the Ingress host (default: branch.<node address>.sslip.io)
+#   ingressClass  the IngressClass (default: the cluster's default class)
+#   name          the branch name shown on screen (default: from the locale)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-web
+  namespace: dmobnk
+  labels: {app: branch-web, dmobnk.smclab.net/tier: branch}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: branch-web}}
+  template:
+    metadata:
+      labels: {app: branch-web, dmobnk.smclab.net/tier: branch}
+    spec:
+      serviceAccountName: branch-web
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: branch-web}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/branch.py"]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - name: BRANCH_HOST
+              valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: host, optional: true}}
+            - name: INGRESS_CLASS
+              valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: ingressClass, optional: true}}
+            - name: BRANCH_NAME
+              valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: name, optional: true}}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-branch-script}}
+        - {name: locale, configMap: {name: locale-uk}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: branch-web, namespace: dmobnk}
+spec: {selector: {app: branch-web}, ports: [{port: 80, targetPort: 8080}]}
+---
+# The queue, counters, branch cash and today's transactions. Nothing here is
+# precious, so no volume: a restart starts the day's queue afresh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-redis
+  namespace: dmobnk
+  labels: {app: branch-redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: branch-redis}}
+  template:
+    metadata: {labels: {app: branch-redis}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: 6379}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: branch-redis, namespace: dmobnk}
+spec: {selector: {app: branch-redis}, ports: [{port: 6379, targetPort: 6379}]}
+---
+# Only the branch app may talk to its Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: branch-redis, namespace: dmobnk}
+spec:
+  podSelector: {matchLabels: {app: branch-redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: branch-web}}}]
+      ports: [{port: 6379}]
+---
+# Plain HTTP on the branch network. The host and class here are placeholders:
+# branch-web sets them once running (ingress_loop in branch.py).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: branch-web
+  namespace: dmobnk
+spec:
+  rules:
+    - host: branch.node-ip.sslip.io
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: branch-web, port: {number: 80}}}}

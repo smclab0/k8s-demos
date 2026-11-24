@@ -1,0 +1,7 @@
+# The four locale-<country> ConfigMaps, shared by the online bank (../base)
+# and the branch app (../branch/base). Each holds the bank's text under "t"
+# and the branch app's under "b".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - locales.yaml

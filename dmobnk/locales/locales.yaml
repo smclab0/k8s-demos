@@ -1,7 +1,8 @@
 # One ConfigMap per country: language, currency format and all the page
-# text. The web Deployment mounts locale-uk; the overlays in ../countries/
-# switch it to another one (Fleet picks the overlay from the cluster's
-# dmobnk.smclab.net/country label, see ../fleet.yaml).
+# text: the online bank's under "t", the branch app's under "b". Both apps
+# mount locale-uk; the overlays in ../countries/ and ../branch/countries/
+# switch to another one (Fleet picks the overlay from the cluster's labels,
+# see ../fleet.yaml).
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -140,7 +141,88 @@ data:
         "error": "Something went wrong. Try again in a moment.",
         "glance_h": "Your Everyday card",
         "view_card": "Manage card →"
-      }
+      },
+      "b": {
+        "branch_name": "London Bridge branch",
+        "title": "Branch counter",
+        "nav_kiosk": "Take a ticket",
+        "nav_board": "Queue board",
+        "nav_teller": "Teller",
+        "kiosk_h": "Welcome. What can we help you with today?",
+        "kiosk_lede": "Take a ticket and we'll call you to a counter.",
+        "svc_A": "Cash and cheques",
+        "svc_A_d": "Pay in, take out or change money.",
+        "svc_B": "Accounts and cards",
+        "svc_B_d": "Open an account, replace a card or update your details.",
+        "svc_C": "Mortgages and loans",
+        "svc_C_d": "Talk to one of our advisers.",
+        "your_ticket": "Your ticket",
+        "ahead": "{n} ahead of you · about {min} min",
+        "ahead_none": "You're next. Please watch the screen.",
+        "done": "Done",
+        "board_h": "Now serving",
+        "counter": "Counter {n}",
+        "free": "Free",
+        "waiting": "Waiting",
+        "none_waiting": "No one is waiting.",
+        "recent": "Just called",
+        "teller_h": "Teller",
+        "your_counter": "Your counter",
+        "call_next": "Call next customer",
+        "serving": "Serving",
+        "finish": "Finish",
+        "nobody": "No customer at this counter.",
+        "queue_empty": "The queue is empty.",
+        "cash_h": "Branch cash",
+        "cash_low": "Cash is running low. Order a delivery.",
+        "tx_h": "Counter transaction",
+        "tx_in": "Pay in",
+        "tx_out": "Withdraw",
+        "tx_amount": "Amount",
+        "tx_account": "Account ending",
+        "tx_go": "Record",
+        "tx_bad": "Enter an amount and the last 4 digits of the account.",
+        "tx_nocash": "There isn't enough cash in the branch for that.",
+        "tx_none": "No transactions yet today.",
+        "tx_done": "Recorded.",
+        "served": "Served today",
+        "avg_wait": "Average wait",
+        "min": "min",
+        "appts_h": "Appointments today",
+        "check_in": "Check in",
+        "checked_in": "Checked in",
+        "ledger_h": "Today's transactions",
+        "staff_note": "Staff screen. All customers and figures are examples.",
+        "error": "Something went wrong. Please try again."
+      },
+      "branch_appts": [
+        [
+          "09:30",
+          "Priya Shah",
+          "Mortgage review"
+        ],
+        [
+          "10:15",
+          "Tom Hughes",
+          "Open a current account"
+        ],
+        [
+          "11:00",
+          "Grace Okafor",
+          "Savings advice"
+        ],
+        [
+          "13:45",
+          "Daniel Price",
+          "Replace a lost card"
+        ],
+        [
+          "15:00",
+          "Aisha Rahman",
+          "Business account"
+        ]
+      ],
+      "branch_cash_start": 50000
     }
 ---
 apiVersion: v1
@@ -280,7 +362,88 @@ data:
         "error": "Something went wrong. Try again in a moment.",
         "glance_h": "Your Everyday card",
         "view_card": "Manage card →"
-      }
+      },
+      "b": {
+        "branch_name": "Midtown branch",
+        "title": "Branch counter",
+        "nav_kiosk": "Take a ticket",
+        "nav_board": "Queue board",
+        "nav_teller": "Teller",
+        "kiosk_h": "Welcome! How can we help you today?",
+        "kiosk_lede": "Take a ticket and we'll call you to a window.",
+        "svc_A": "Cash and checks",
+        "svc_A_d": "Make a deposit, withdraw cash or exchange currency.",
+        "svc_B": "Accounts and cards",
+        "svc_B_d": "Open an account, replace a card or update your information.",
+        "svc_C": "Mortgages and loans",
+        "svc_C_d": "Meet with one of our bankers.",
+        "your_ticket": "Your ticket",
+        "ahead": "{n} ahead of you · about {min} min",
+        "ahead_none": "You're next. Please watch the screen.",
+        "done": "Done",
+        "board_h": "Now serving",
+        "counter": "Window {n}",
+        "free": "Open",
+        "waiting": "Waiting",
+        "none_waiting": "No one is waiting.",
+        "recent": "Just called",
+        "teller_h": "Teller",
+        "your_counter": "Your window",
+        "call_next": "Call next customer",
+        "serving": "Serving",
+        "finish": "Finish",
+        "nobody": "No customer at this window.",
+        "queue_empty": "The line is empty.",
+        "cash_h": "Branch cash",
+        "cash_low": "Cash is running low. Order a delivery.",
+        "tx_h": "Teller transaction",
+        "tx_in": "Deposit",
+        "tx_out": "Withdraw",
+        "tx_amount": "Amount",
+        "tx_account": "Account ending in",
+        "tx_go": "Record",
+        "tx_bad": "Enter an amount and the last 4 digits of the account.",
+        "tx_nocash": "There isn't enough cash in the branch for that.",
+        "tx_none": "No transactions yet today.",
+        "tx_done": "Recorded.",
+        "served": "Served today",
+        "avg_wait": "Average wait",
+        "min": "min",
+        "appts_h": "Today's appointments",
+        "check_in": "Check in",
+        "checked_in": "Checked in",
+        "ledger_h": "Today's transactions",
+        "staff_note": "Staff screen. All customers and figures are examples.",
+        "error": "Something went wrong. Please try again."
+      },
+      "branch_appts": [
+        [
+          "09:30",
+          "Maria Lopez",
+          "Mortgage review"
+        ],
+        [
+          "10:15",
+          "Jake Miller",
+          "Open a checking account"
+        ],
+        [
+          "11:00",
+          "Keisha Brown",
+          "Savings advice"
+        ],
+        [
+          "13:45",
+          "Ethan Park",
+          "Replace a lost card"
+        ],
+        [
+          "15:00",
+          "Olivia Chen",
+          "Business account"
+        ]
+      ],
+      "branch_cash_start": 60000
     }
 ---
 apiVersion: v1
@@ -420,7 +583,88 @@ data:
         "error": "Etwas ist schiefgelaufen. Bitte gleich noch einmal versuchen.",
         "glance_h": "Ihre Alltagskarte",
         "view_card": "Karte verwalten →"
-      }
+      },
+      "b": {
+        "branch_name": "Filiale Frankfurt",
+        "title": "Filialschalter",
+        "nav_kiosk": "Nummer ziehen",
+        "nav_board": "Aufrufanzeige",
+        "nav_teller": "Schalter",
+        "kiosk_h": "Willkommen! Wobei können wir Ihnen heute helfen?",
+        "kiosk_lede": "Ziehen Sie eine Nummer, wir rufen Sie an einen Schalter.",
+        "svc_A": "Bargeld und Schecks",
+        "svc_A_d": "Einzahlen, abheben oder Geld wechseln.",
+        "svc_B": "Konten und Karten",
+        "svc_B_d": "Konto eröffnen, Karte ersetzen oder Daten ändern.",
+        "svc_C": "Baufinanzierung und Kredite",
+        "svc_C_d": "Sprechen Sie mit unseren Beraterinnen und Beratern.",
+        "your_ticket": "Ihre Nummer",
+        "ahead": "{n} vor Ihnen · etwa {min} Min.",
+        "ahead_none": "Sie sind als Nächstes dran. Bitte achten Sie auf die Anzeige.",
+        "done": "Fertig",
+        "board_h": "Aufruf",
+        "counter": "Schalter {n}",
+        "free": "Frei",
+        "waiting": "Wartend",
+        "none_waiting": "Niemand wartet.",
+        "recent": "Zuletzt aufgerufen",
+        "teller_h": "Schalter",
+        "your_counter": "Ihr Schalter",
+        "call_next": "Nächste Person aufrufen",
+        "serving": "Im Gespräch",
+        "finish": "Abschließen",
+        "nobody": "Niemand an diesem Schalter.",
+        "queue_empty": "Die Warteschlange ist leer.",
+        "cash_h": "Bargeldbestand",
+        "cash_low": "Bargeld wird knapp. Bitte Lieferung bestellen.",
+        "tx_h": "Schaltervorgang",
+        "tx_in": "Einzahlung",
+        "tx_out": "Auszahlung",
+        "tx_amount": "Betrag",
+        "tx_account": "Konto endet auf",
+        "tx_go": "Buchen",
+        "tx_bad": "Bitte Betrag und die letzten 4 Ziffern des Kontos eingeben.",
+        "tx_nocash": "Dafür ist nicht genug Bargeld in der Filiale.",
+        "tx_none": "Heute noch keine Vorgänge.",
+        "tx_done": "Gebucht.",
+        "served": "Heute bedient",
+        "avg_wait": "Ø Wartezeit",
+        "min": "Min.",
+        "appts_h": "Termine heute",
+        "check_in": "Einchecken",
+        "checked_in": "Eingecheckt",
+        "ledger_h": "Vorgänge heute",
+        "staff_note": "Ansicht für Mitarbeitende. Alle Kundinnen, Kunden und Beträge sind Beispiele.",
+        "error": "Etwas ist schiefgelaufen. Bitte erneut versuchen."
+      },
+      "branch_appts": [
+        [
+          "09:30",
+          "Anna Schneider",
+          "Baufinanzierung"
+        ],
+        [
+          "10:15",
+          "Lukas Weber",
+          "Girokonto eröffnen"
+        ],
+        [
+          "11:00",
+          "Fatma Yilmaz",
+          "Sparberatung"
+        ],
+        [
+          "13:45",
+          "Jonas Fischer",
+          "Karte verloren"
+        ],
+        [
+          "15:00",
+          "Sophie Wagner",
+          "Geschäftskonto"
+        ]
+      ],
+      "branch_cash_start": 55000
     }
 ---
 apiVersion: v1
@@ -560,5 +804,86 @@ data:
         "error": "Uh oh, gerbits! Tryza again inna momentoo.",
         "glance_h": "Yoo Evrydai carda",
         "view_card": "Manaja carda →"
-      }
+      },
+      "b": {
+        "branch_name": "Willow Creek bankaboo",
+        "title": "Bankaboo countra",
+        "nav_kiosk": "Ticketa",
+        "nav_board": "Queuebo",
+        "nav_teller": "Tellaboo",
+        "kiosk_h": "Sul sul! Wat yoo needa toodai?",
+        "kiosk_lede": "Grabba ticketa an' we calla yoo to countra.",
+        "svc_A": "Simoleons an' chequas",
+        "svc_A_d": "Payza in, takka out, swappa monies.",
+        "svc_B": "Accountias an' cardas",
+        "svc_B_d": "Nooboo accountia, nooboo cardaboo, changa detailz.",
+        "svc_C": "Hoozagoo an' loanish",
+        "svc_C_d": "Chatta wif advisaboo.",
+        "your_ticket": "Yoo ticketa",
+        "ahead": "{n} befoora yoo · aboot {min} min",
+        "ahead_none": "Yoo nexta! Watcha da screenie.",
+        "done": "Dag dag",
+        "board_h": "Noo servin'",
+        "counter": "Countra {n}",
+        "free": "Freebo",
+        "waiting": "Waitaboo",
+        "none_waiting": "Nobobo waitin'.",
+        "recent": "Jus' calla",
+        "teller_h": "Tellaboo",
+        "your_counter": "Yoo countra",
+        "call_next": "Calla nexta",
+        "serving": "Servin'",
+        "finish": "Finisha",
+        "nobody": "Nobobo at dis countra.",
+        "queue_empty": "Queuebo emptee.",
+        "cash_h": "Bankaboo simoleons",
+        "cash_low": "Simoleons lowlow! Orda delivaboo.",
+        "tx_h": "Countra transactia",
+        "tx_in": "Payza in",
+        "tx_out": "Takka out",
+        "tx_amount": "Amounta",
+        "tx_account": "Accountia endin'",
+        "tx_go": "Recorda",
+        "tx_bad": "Putta amounta an' 4 diggies o' accountia.",
+        "tx_nocash": "No enuff simoleons in bankaboo.",
+        "tx_none": "No transactias toodai.",
+        "tx_done": "Vadish!",
+        "served": "Served toodai",
+        "avg_wait": "Waitaboo avg",
+        "min": "min",
+        "appts_h": "Appointias toodai",
+        "check_in": "Checka in",
+        "checked_in": "Checka'd",
+        "ledger_h": "Toodai transactias",
+        "staff_note": "Staffa screenie. All Sims an' simoleons ara exampla.",
+        "error": "Oh noes! Trya again."
+      },
+      "branch_appts": [
+        [
+          "09:30",
+          "Bella Goth",
+          "Hoozagoo chatta"
+        ],
+        [
+          "10:15",
+          "Mortimer Goth",
+          "Nooboo accountia"
+        ],
+        [
+          "11:00",
+          "Bob Pancakes",
+          "Savaboo advicia"
+        ],
+        [
+          "13:45",
+          "Eliza Pancakes",
+          "Losta cardaboo"
+        ],
+        [
+          "15:00",
+          "Don Lothario",
+          "Bizniz accountia"
+        ]
+      ],
+      "branch_cash_start": 80000
     }
