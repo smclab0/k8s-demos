@@ -1,7 +1,7 @@
 # One ConfigMap per country: language, currency format and all the page
 # text: the online bank's under "t", the branch kiosk's under "b", and the
 # kiosk's demo customers, limits and opening hours under "kiosk". Both apps
-# mount locale-uk; ../countries/ and the Components in country/
+# mount locale-uk; the Components in country/
 # switch to another one (Fleet picks the overlay from the cluster's labels,
 # see ../fleet.yaml).
 ---

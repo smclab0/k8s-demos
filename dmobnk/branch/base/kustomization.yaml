@@ -4,8 +4,6 @@ kind: Kustomization
 # The branch kiosk. Like the online bank, no Namespace here: Fleet or
 # deploy.sh creates `dmobnk`.
 resources:
-  - ../../locales
-  - ../../common
   - branch.yaml
   - rbac.yaml
 

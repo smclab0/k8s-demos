@@ -1,5 +1,5 @@
 # The DMOBNK front end. Its language and currency come from the mounted
-# locale ConfigMap: locale-uk here, swapped by the overlays in ../countries/.
+# locale ConfigMap: locale-uk here, swapped by the Components in ../locales/country/.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +41,7 @@ spec:
             - {name: locale, mountPath: /locale, readOnly: true}
             - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
             - {name: crm-link, mountPath: /etc/dmobnk-crm, readOnly: true}
+            - {name: crm-local, mountPath: /etc/dmobnk-crm-local, readOnly: true}
       volumes:
         - {name: script, configMap: {name: dmobnk-web-script}}
         - {name: locale, configMap: {name: locale-uk}}
@@ -48,6 +49,10 @@ spec:
         - {name: lib, configMap: {name: dmobnk-ingress-host}}
         # Linking to a CRM (../common/crm_feed.py). Optional: no Secret, no events.
         - {name: crm-link, secret: {secretName: dmobnk-crm-link, optional: true}}
+        # A CRM on this same cluster: just its ingest token, so events reach
+        # it with no link Secret.
+        - name: crm-local
+          secret: {secretName: dmobnk-crm, optional: true, items: [{key: token, path: token}]}
 ---
 apiVersion: v1
 kind: Service

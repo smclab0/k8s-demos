@@ -1,5 +1,5 @@
-# The DMOBNK CRM: staff's customer and sales app, deployed instead of the
-# online bank on clusters labelled crm=true (see ../../fleet.yaml).
+# The DMOBNK CRM: staff's customer and sales app, deployed by Fleet to
+# clusters labelled crm=true (see ../../fleet.yaml).
 #
 # Optional per-cluster settings live in a `dmobnk-crm-site` ConfigMap that
 # isn't in git (create it with kubectl, then restart crm-web):

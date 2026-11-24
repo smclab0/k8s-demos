@@ -2,28 +2,30 @@
 # Deploys DMOBNK to the current kube context without Fleet. Takes the same
 # words as the cluster labels under Fleet (see fleet.yaml), in any order:
 #
-#   dmobnk/deploy.sh [branch] [crm] [admin] [uk|us|de|sim]
+#   dmobnk/deploy.sh [bank] [branch] [crm] [admin] [uk|us|de|sim]
 #
-#   (nothing)      the online bank, at https://dev.smclab.net/dmobnk/ with
-#                  Kube Power at /dmobnk/admin (lenny-new's site)
-#   branch         the branch kiosk instead, at http://branch.<address>.sslip.io/
-#   crm            the CRM instead, at http://crm.<address>.sslip.io/
-#   branch crm     the kiosk and the CRM side by side
-#   admin          adds Kube Power to whatever's deployed
+#   (nothing), bank  the online bank, at https://dev.smclab.net/dmobnk/ with
+#                    Kube Power at /dmobnk/admin (lenny-new's site)
+#   branch           the branch kiosk, at http://branch.<address>.sslip.io/
+#   crm              the CRM, at http://crm.<address>.sslip.io/
+#   admin            adds Kube Power to whatever's deployed
+# Combine them freely (e.g. `bank branch crm admin`); without bank, branch
+# or crm you get the bank.
 # The country defaults to uk. DMOBNK_SITE=auto deploys the bank on sslip.io
 # (targets/) instead of dev.smclab.net, where it then needs `admin` for
 # Kube Power.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BRANCH=""; CRM=""; ADMIN=""; COUNTRY=uk
+BANK=""; BRANCH=""; CRM=""; ADMIN=""; COUNTRY=uk
 for arg in "$@"; do
   case "${arg}" in
-    branch) BRANCH=1 ;; crm) CRM=1 ;; admin) ADMIN=1 ;;
+    bank) BANK=1 ;; branch) BRANCH=1 ;; crm) CRM=1 ;; admin) ADMIN=1 ;;
     uk|us|de|sim) COUNTRY="${arg}" ;;
-    *) echo "unknown word '${arg}': use branch, crm, admin and uk, us, de or sim" >&2; exit 1 ;;
+    *) echo "unknown word '${arg}': use bank, branch, crm, admin and uk, us, de or sim" >&2; exit 1 ;;
   esac
 done
-COMBO="${BRANCH:+branch}"
+COMBO="${BANK:+bank}"
+[ -n "${BRANCH}" ] && COMBO="${COMBO:+${COMBO}-}branch"
 [ -n "${CRM}" ] && COMBO="${COMBO:+${COMBO}-}crm"
 COMBO="${COMBO:-bank}${ADMIN:+-admin}"
 SRC="${DIR}/targets/${COMBO}/${COUNTRY}"

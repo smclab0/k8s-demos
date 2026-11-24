@@ -17,7 +17,7 @@ Pages: **Home** (services, your card at a glance, exchange rates, gold price), *
 
 ## Kube Power control room (admins only)
 
-Kube Power is deployed only to clusters labelled **`admin=true`**, next to whatever else they run: on the online bank at `/dmobnk/admin` (linked as **Admin** in the bank's footer), on a kiosk or CRM cluster at `/admin` on the kiosk's (or CRM's) host. Other clusters don't run it at all: no pod, no permissions, no link. `dev.smclab.net` (`sites/dev-smclab`) always has it.
+Kube Power is deployed only to clusters labelled **`admin=true`**, next to whatever else they run, and controls all of it: on a cluster with the online bank at `/dmobnk/admin` on the bank's host (linked as **Admin** in the bank's footer), otherwise at `/admin` on the kiosk's (or CRM's) host. Other clusters don't run it at all: no pod, no permissions, no link. `dev.smclab.net` (`sites/dev-smclab`) always has it.
 
 After you sign in with the admin password, it shows the `dmobnk` namespace live: pods on each node, the deployments and recent events (and, on the bank, the rates autoscaler and rates CronJob). You can also:
 
@@ -44,7 +44,7 @@ A sign-in lasts 8 hours. Five wrong passwords from one address lock it out for 5
 
 ## Branch kiosk (`branch=true`)
 
-A cluster labelled `branch=true` gets the **branch kiosk** *instead of* the online bank: a full-screen, touch-friendly self-service kiosk for one high-street branch, running on the branch's own (edge) cluster. There are no staff screens.
+A cluster labelled `branch=true` gets the **branch kiosk**: a full-screen, touch-friendly self-service kiosk for one high-street branch, running on the branch's own (edge) cluster. There are no staff screens.
 
 | Without a card | With a (demo) card and PIN |
 |---|---|
@@ -75,7 +75,7 @@ kubectl -n dmobnk rollout restart deploy/branch-web
 
 ## CRM (`crm=true`)
 
-A cluster labelled `crm=true` gets the **CRM**, the bank staff's customer and sales app, at `http://crm.<external address>.sslip.io/`. With `branch=true` as well, it runs next to the kiosk; otherwise it replaces the online bank.
+A cluster labelled `crm=true` gets the **CRM**, the bank staff's customer and sales app, at `http://crm.<external address>.sslip.io/`. It runs next to whichever other apps the cluster's labels ask for.
 
 | Page | What it does |
 |---|---|
@@ -94,7 +94,7 @@ The 40 example customers (including the kiosk's three demo customers, with the s
 kubectl -n dmobnk get secret dmobnk-crm -o jsonpath='{.data.password}' | base64 -d
 ```
 
-**Live from the bank and kiosks.** The online bank and kiosks run on other clusters. To link one, create a `dmobnk-crm-link` Secret on it (the CRM's **Connect** page shows the exact command, with its URL and token). It's mounted as an optional volume, so it takes effect within a minute or so, without a restart; without it, nothing is sent. Then:
+**Live from the bank and kiosks.** A bank or kiosk on the same cluster as the CRM sends it events by itself (it reads the CRM's token from the `dmobnk-crm` Secret). To link one on another cluster, create a `dmobnk-crm-link` Secret on that cluster (the CRM's **Connect** page shows the exact command, with its URL and token). It's mounted as an optional volume, so it takes effect within a minute or so, without a restart; without it, nothing is sent. Then:
 
 | Event | In the CRM |
 |---|---|
@@ -110,27 +110,27 @@ The online bank's signed-in customer is the country's first demo customer (Priya
 
 - `base/`: the online bank's manifests and `web.py`. The web pods mount `locale-uk`.
 - `admin/`: Kube Power. `admin/base/` is the Deployment, Service, Ingress and code; `admin/<app>/` are Components that set what it controls.
-- `crm/`: the CRM. `crm/app/` is the app on its own; `crm/base/` adds the shared locales and modules.
+- `crm/`: the CRM (`crm/app/`). `base/`, `branch/base/` and `crm/app/` hold just their app: the shared `locales/` and `common/` are added once per cluster by `targets/`, `kustomization.yaml`, `branch/` and `crm/base/`.
 - `targets/<combo>/<cc>`: what each combination of labels and country gets, used by Fleet and `deploy.sh`. Written by `targets/generate.py`, with `fleet.yaml`'s target list, `admin/<app>/` and `locales/country/<cc>/`: edit the script and rerun it rather than editing its output.
 - `common/`: Python modules the apps share: `ingress_host.py` (points an Ingress at the cluster), `redis_lite.py` (a tiny Redis client) and `crm_feed.py` (sends events to a linked CRM).
 - `sites/dev-smclab/`: lenny-new's `dev.smclab.net` Ingress, as a component plus one overlay per country (used by `deploy.sh`).
 - `locales/`: the four `locale-<country>` ConfigMaps, used by both apps (bank text under `t`, branch text under `b`).
 - `branch/`: the branch kiosk (`branch/base/`).
-- `kustomization.yaml`: the default, UK deployment (just `base/`).
-- `countries/us`, `countries/de`, `countries/sim`: overlays that switch the bank's web pods to that country's locale (used by `sites/dev-smclab`).
+- `kustomization.yaml`: the default, UK online bank (a cluster with no labels).
 - `fleet.yaml`: Fleet settings, including which app and overlay each cluster gets.
 
 ## Deploy with Rancher Fleet
 
 Point a GitRepo at this repo with path `dmobnk`, then label each cluster in Rancher (Cluster Management → the cluster → Edit Config → Labels).
 
-| Labels (each set to `true`) | What the cluster gets |
+| Label (set to `true`) | Adds |
 |---|---|
-| none | The online bank |
-| `branch` | The branch kiosk instead |
-| `crm` | The CRM instead |
-| `branch` and `crm` | The kiosk and the CRM side by side |
-| `admin`, with any of the above | Adds Kube Power |
+| `bank` | The online bank |
+| `branch` | The branch kiosk |
+| `crm` | The CRM |
+| `admin` | Kube Power, controlling all of the above that run there |
+
+Combine them freely: `bank=true`, `branch=true`, `crm=true` and `admin=true` together give a cluster everything. A cluster with none of `bank`, `branch` or `crm` gets the online bank, so unlabelled clusters keep it.
 
 Only the value `true` counts: `branch=false` (or any other value) is the same as no label.
 
@@ -141,15 +141,15 @@ Only the value `true` counts: `branch=false` (or any other value) is the same as
 | `dmobnk.smclab.net/country=de` | German, € |
 | `dmobnk.smclab.net/country=sim` | Simlish, § |
 
-Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, most specific first) and deploys that combination's overlay in `targets/`. Change a label and Fleet redeploys on its own: adding `branch=true` swaps the online bank for the kiosk. `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
+Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, most specific first) and deploys that combination's overlay in `targets/`. Change a label and Fleet redeploys on its own: adding `branch=true` adds the kiosk (and, without `bank=true`, takes the online bank away). `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
 
 A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, for the rates autoscaler, metrics-server. Each app points its own Ingress at the cluster they land on (`common/ingress_host.py`), using its default IngressClass and an sslip.io host built from the cluster's external address, the same way for all of them (see *Where it's served* above):
 
 | App | URL on a Fleet cluster |
 |---|---|
 | Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (with `admin=true`, Kube Power at `…/dmobnk/admin`) |
-| Branch kiosk | `http://branch.<external address>.sslip.io/` (with `admin=true`, Kube Power at `…/admin`) |
-| CRM | `http://crm.<external address>.sslip.io/` (with `admin=true` and no kiosk, Kube Power at `…/admin`) |
+| Branch kiosk | `http://branch.<external address>.sslip.io/` (with `admin=true` and no bank, Kube Power at `…/admin`; or on the CRM's host if there's no kiosk either) |
+| CRM | `http://crm.<external address>.sslip.io/` |
 
 Without a load balancer address, the address is the ExternalIP of the first Ready worker node by name, so every replica (and Kube Power, which copies its app's host) agrees on one; it moves on if that node goes away.
 
@@ -162,9 +162,9 @@ Don't mix Fleet and `deploy.sh` on one cluster: Helm won't adopt resources that 
 ```sh
 kubectl config use-context lenny-new
 ./dmobnk/deploy.sh                    # the online bank, UK; or: ./dmobnk/deploy.sh de   (uk | us | de | sim)
-./dmobnk/deploy.sh branch             # the branch kiosk instead
-./dmobnk/deploy.sh crm                # the CRM instead
-./dmobnk/deploy.sh branch crm admin   # the same words as the labels, in any order
+./dmobnk/deploy.sh branch             # the branch kiosk (only)
+./dmobnk/deploy.sh crm                # the CRM (only)
+./dmobnk/deploy.sh bank branch crm admin   # the same words as the labels, in any order
 ```
 
 The script creates the `dmobnk` namespace, applies the overlay for those words (`targets/<combo>/<cc>`), waits for every rollout, seeds the first rates and prints each app's URL. For the online bank it uses `sites/dev-smclab/<cc>`, which serves it at `https://dev.smclab.net/dmobnk/` (ingress-nginx, cert-manager's `letsencrypt-cloudflare`); run it with `DMOBNK_SITE=auto` for the self-configuring sslip.io Ingress instead. The dev.smclab.net site always includes Kube Power; with `DMOBNK_SITE=auto`, only `admin` adds it. It also prints how to read the CRM's and Kube Power's passwords. Running it again with another country switches the site.
@@ -175,7 +175,7 @@ Editing `base/web.py` (or `branch/base/branch.py`, `crm/app/crm.py`) changes the
 
 1. Add a `locale-<cc>` ConfigMap to `locales/locales.yaml`, with the `t` (bank) and `b` and `kiosk` (branch) sections.
 2. Add the country to `COUNTRIES` in `targets/generate.py` and run it; add its example people to `DATA` in `crm/app/crm.py`.
-3. Copy `countries/de` to `countries/<cc>` and `sites/dev-smclab/de` to `sites/dev-smclab/<cc>`, and change `de` in each.
+3. Copy `sites/dev-smclab/de` to `sites/dev-smclab/<cc>` and change `de` in it.
 
 ## Remove
 

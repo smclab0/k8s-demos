@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Writes DMOBNK's per-cluster overlays and Fleet's target list from three
-cluster labels (each set to "true") and the country label:
+"""Writes DMOBNK's per-cluster overlays and Fleet's target list from the
+cluster labels (each set to "true", and combined freely) and the country:
 
-  branch=true   the branch kiosk instead of the online bank
-  crm=true      the CRM instead of the online bank (with branch=true: the
-                kiosk and the CRM side by side)
+  bank=true     the online bank
+  branch=true   the branch kiosk
+  crm=true      the CRM
   admin=true    adds Kube Power, the admin control room, to whatever runs
   dmobnk.smclab.net/country = uk | us | de | sim   (default uk)
+A cluster with none of bank, branch or crm gets the online bank, so an
+unlabelled cluster (or one with just admin=true) still gets the bank.
 
 It writes targets/<combo>/<cc>/kustomization.yaml, the Kube Power
-variants in ../admin/<app>/, the country Components in
+variants in ../admin/<apps>/, the country Components in
 ../locales/country/<cc>/, and the targetCustomizations block of
 ../fleet.yaml. Run it after changing any of this, and commit the output:
 
@@ -23,35 +25,50 @@ ROOT = os.path.dirname(HERE)
 COUNTRIES = ["uk", "us", "de", "sim"]
 LABEL_CC = "dmobnk.smclab.net/country"
 
-# app set -> (resources, Kube Power settings)
+# Each app on its own (no shared locales or modules: every target adds
+# those once), and what Kube Power needs to know about it.
 APPS = {
-    "bank": {"res": ["base"], "admin": {
-        "base": "/dmobnk/admin", "url": "/dmobnk/", "name": "the bank", "prefix": "dmobnk", "site": "dmobnk-site", "follow": "dmobnk",
-        "apps": ["web", "accounts-svc", "cards-svc", "loans-svc", "mortgage-svc", "rates-svc", "crossborder-svc"],
-        "hpa": "rates-svc", "surge": "rates-svc", "cron": "rates-refresh"}},
-    "branch": {"res": ["branch/base"], "admin": {
-        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch", "follow": "branch-web",
-        "apps": ["branch-web"], "hpa": "", "surge": "", "cron": ""}},
-    "crm": {"res": ["crm/base"], "admin": {
-        "base": "/admin", "url": "/", "name": "the CRM", "prefix": "crm", "site": "dmobnk-crm-site", "follow": "crm-web",
-        "apps": ["crm-web"], "hpa": "", "surge": "", "cron": ""}},
-    # Side by side: the shared locales and modules come in once, with the kiosk.
-    "branch-crm": {"res": ["branch/base", "crm/app"], "admin": {
-        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch", "follow": "branch-web",
-        "apps": ["branch-web", "crm-web"], "hpa": "", "surge": "", "cron": ""}},
+    "bank": {"res": "base", "what": "the online bank", "ingress": "dmobnk", "base": "/dmobnk/admin", "url": "/dmobnk/",
+             "name": "the bank", "prefix": "dmobnk", "site": "dmobnk-site",
+             "apps": ["web", "accounts-svc", "cards-svc", "loans-svc", "mortgage-svc", "rates-svc", "crossborder-svc"],
+             "hpa": "rates-svc", "surge": "rates-svc", "cron": "rates-refresh"},
+    "branch": {"res": "branch/base", "what": "the branch kiosk", "ingress": "branch-web", "base": "/admin", "url": "/",
+               "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch", "apps": ["branch-web"],
+               "hpa": "", "surge": "", "cron": ""},
+    "crm": {"res": "crm/app", "what": "the CRM", "ingress": "crm-web", "base": "/admin", "url": "/",
+            "name": "the CRM", "prefix": "crm", "site": "dmobnk-crm-site", "apps": ["crm-web"],
+            "hpa": "", "surge": "", "cron": ""},
 }
-# combo name -> (labels, app set, admin); most specific first, since Fleet
-# uses the first target that matches.
-COMBOS = [
-    ("branch-crm-admin", ["branch", "crm", "admin"], "branch-crm", True),
-    ("branch-crm", ["branch", "crm"], "branch-crm", False),
-    ("branch-admin", ["branch", "admin"], "branch", True),
-    ("crm-admin", ["crm", "admin"], "crm", True),
-    ("bank-admin", ["admin"], "bank", True),
-    ("branch", ["branch"], "branch", False),
-    ("crm", ["crm"], "crm", False),
-    ("bank", [], "bank", False),
-]
+ORDER = ["bank", "branch", "crm"]
+
+
+def app_sets():
+    """Every non-empty combination of apps, as lists in ORDER."""
+    out = []
+    for mask in range(1, 1 << len(ORDER)):
+        out.append([a for i, a in enumerate(ORDER) if mask >> i & 1])
+    return out
+
+
+def admin_settings(apps):
+    """Kube Power for a set of apps: it lives on the first one's host (the
+    bank's, if it's there) and may control all of their deployments."""
+    lead = APPS[apps[0]]
+    a = {k: lead[k] for k in ("base", "url", "name", "prefix", "site", "hpa", "surge", "cron")}
+    a["follow"] = lead["ingress"]
+    a["apps"] = [d for x in apps for d in APPS[x]["apps"]]
+    return a
+
+
+# combo name -> (labels, apps, admin). Fleet uses the first target that
+# matches, so they're listed most labels first.
+COMBOS = []
+for apps in app_sets():
+    for admin in (True, False):
+        COMBOS.append(("-".join(apps) + ("-admin" if admin else ""), apps + (["admin"] if admin else []), apps, admin))
+# No app labels at all: the online bank.
+COMBOS += [("bank-admin", ["admin"], ["bank"], True), ("bank", [], ["bank"], False)]
+COMBOS.sort(key=lambda c: -len(c[1]))
 HEADER = "# Generated by targets/generate.py. Edit that, not this.\n"
 
 
@@ -75,8 +92,9 @@ patches:
 """)
 
 
-def admin_variant(app):
-    a = APPS[app]["admin"]
+def admin_variant(apps):
+    app = "-".join(apps)
+    a = admin_settings(apps)
     jobs = bool(a["surge"])
     role = f"""{HEADER}# What Kube Power may do, all within the dmobnk namespace.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -136,7 +154,7 @@ rules:
            ("ADMIN_APPS", ",".join(a["apps"])), ("ADMIN_HPA", a["hpa"]), ("ADMIN_SURGE", a["surge"]), ("ADMIN_CRON", a["cron"]), ("FOLLOW_INGRESS", a["follow"])]
     env_yaml = "\n".join(f'                  - {{name: {k}, value: "{v}"}}' for k, v in env)
     link = ""
-    if app == "bank":
+    if "bank" in apps:
         link = """  # Show the "Admin" link in the bank's footer.
   - target: {kind: Deployment, name: web}
     patch: |-
@@ -179,12 +197,13 @@ patches:
     write(f"admin/{app}/kustomization.yaml", kust)
 
 
-def target(combo, labels, app, admin, cc):
-    what = {"bank": "the online bank", "branch": "the branch kiosk", "crm": "the CRM",
-            "branch-crm": "the branch kiosk and the CRM"}[app] + (" plus Kube Power" if admin else "")
-    sel = ", ".join(f"{k}=true" for k in labels) or "none of branch, crm or admin"
-    res = "\n".join(f"  - ../../../{r}" for r in APPS[app]["res"])
-    comps = ([f"  - ../../../locales/country/{cc}"] if cc != "uk" else []) + ([f"  - ../../../admin/{app}"] if admin else [])
+def target(combo, labels, apps, admin, cc):
+    what = " and ".join(APPS[a]["what"] for a in apps) + (" plus Kube Power" if admin else "")
+    sel = ", ".join(f"{k}=true" for k in labels)
+    if apps == ["bank"]:
+        sel += " (or no bank, branch or crm label at all)"
+    res = "\n".join(f"  - ../../../{r}" for r in ["locales", "common"] + [APPS[a]["res"] for a in apps])
+    comps = ([f"  - ../../../locales/country/{cc}"] if cc != "uk" else []) + (["  - ../../../admin/" + "-".join(apps)] if admin else [])
     write(f"targets/{combo}/{cc}/kustomization.yaml", f"""{HEADER}# {what}, country {cc}. Labels: {sel}.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -200,28 +219,41 @@ def fleet_block():
             if not labels and cc == "uk":
                 continue  # no labels at all: the bundle's root kustomization (the bank, UK)
             ml = [f'{k}: "true"' for k in labels] + ([f"{LABEL_CC}: {cc}"] if cc != "uk" else [])
-            out.append(f"  - name: {combo}-{cc}\n    clusterSelector:\n      matchLabels: {{{', '.join(ml)}}}\n"
+            name = combo + ("" if set(labels) & set(ORDER) else "-nolabel")
+            out.append(f"  - name: {name}-{cc}\n    clusterSelector:\n      matchLabels: {{{', '.join(ml)}}}\n"
                        f"    kustomize: {{dir: targets/{combo}/{cc}}}\n")
     out.append("  # END generated\n")
     return "".join(out)
 
 
 def main():
+    import shutil
+    # Start clean, so a combination that no longer exists doesn't linger.
+    for d in os.listdir(HERE):
+        if os.path.isdir(os.path.join(HERE, d)):
+            shutil.rmtree(os.path.join(HERE, d))
+    for d in os.listdir(os.path.join(ROOT, "admin")):
+        if d != "base":
+            shutil.rmtree(os.path.join(ROOT, "admin", d))
     for cc in COUNTRIES:
         if cc != "uk":
             country_component(cc)
-    for app in APPS:
-        admin_variant(app)
-    for combo, labels, app, admin in COMBOS:
+    for apps in app_sets():
+        admin_variant(apps)
+    done = set()
+    for combo, labels, apps, admin in COMBOS:
+        if combo in done:      # "bank" with no app labels shares bank=true's overlay
+            continue
+        done.add(combo)
         for cc in COUNTRIES:
-            target(combo, labels, app, admin, cc)
+            target(combo, labels, apps, admin, cc)
     p = os.path.join(ROOT, "fleet.yaml")
     s = open(p).read()
     s, n = re.subn(r"  # BEGIN generated by targets/generate.py\n.*?  # END generated\n", lambda m: fleet_block(), s, flags=re.S)
     if n != 1:
         raise SystemExit("fleet.yaml has no generated block")
     open(p, "w").write(s)
-    print(f"wrote {len(COMBOS) * len(COUNTRIES)} targets and fleet.yaml")
+    print(f"wrote {len(done) * len(COUNTRIES)} overlays and fleet.yaml")
 
 
 if __name__ == "__main__":

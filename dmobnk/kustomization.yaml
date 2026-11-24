@@ -1,7 +1,9 @@
-# The default deployment: the UK site, in pounds sterling. The other
-# countries are overlays in countries/<cc>/; Fleet picks one from the
-# cluster's dmobnk.smclab.net/country label (see fleet.yaml).
+# The default deployment: the UK online bank, in pounds sterling, for a
+# cluster with no DMOBNK labels. Other clusters get targets/<combo>/<cc>
+# (see fleet.yaml and targets/generate.py).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - base
+  - locales
+  - common

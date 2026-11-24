@@ -9,9 +9,9 @@ the demo password, dmopwd1, on first start, see init) and say who they are. They
   - give and complete follow-up tasks;
   - work a sales pipeline (new, contacted, application, approved, won, lost).
 
-The online bank and the branch kiosks run on other clusters. When one is
-linked (a `dmobnk-crm-link` Secret there, see the Connect page and
-../../common/crm_feed.py), it posts events to /api/ingest: kiosk sign-ins,
+The online bank and branch kiosks post events to /api/ingest: on the same
+cluster automatically, on other clusters once linked (a `dmobnk-crm-link`
+Secret there, see the Connect page and ../../common/crm_feed.py): kiosk sign-ins,
 cash and payments update the customer's record; a kiosk appointment
 creates a prospect, an opportunity and a task; an online mortgage
 application moves the pipeline; a card freeze creates a call-back task.
@@ -915,7 +915,7 @@ async function connect(root) {
   view = 'connect';
   const d = await api('connect'); const url = location.origin;
   const card = el('div', 'card'); card.append(el('h1', '', 'Connect banks and kiosks'));
-  card.append(el('p', '', 'The online bank and branch kiosks run on their own clusters. To send their events here, create this Secret in the dmobnk namespace of each one. It takes effect within a minute or so, with no restart.'));
+  card.append(el('p', '', 'A bank or kiosk on this cluster sends its events here by itself. For one on another cluster, create this Secret in that cluster\'s dmobnk namespace. It takes effect within a minute or so, with no restart.'));
   const cmd = 'kubectl -n dmobnk create secret generic dmobnk-crm-link \\\n  --from-literal=url=' + url + ' \\\n  --from-literal=token=' + d.token;
   const code = el('code', 'blk', cmd); card.append(code);
   const cp = el('button', 'btn ghost sm', 'Copy'); cp.style.marginTop = '8px'; cp.onclick = async () => { try { await navigator.clipboard.writeText(cmd); toast('Copied'); } catch (e) { toast('Select the text to copy it'); } }; card.append(cp);

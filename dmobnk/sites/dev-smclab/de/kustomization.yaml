@@ -1,9 +1,12 @@
-# The online bank for country "de" on lenny-new: at dev.smclab.net with the Kube Power
-# control room (see ../component).
+# lenny-new's dev.smclab.net: the online bank (country de) with Kube Power,
+# behind ingress-nginx with TLS (see ../component).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../../countries/de
+  - ../../../base
+  - ../../../locales
+  - ../../../common
 components:
+  - ../../../locales/country/de
   - ../../../admin/bank
   - ../component
