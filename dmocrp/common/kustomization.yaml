@@ -1,0 +1,9 @@
+# The shared module dmocrp-web mounts at /opt/dmobnk (a copy of
+# ../../dmobnk/common/ingress_host.py, refreshed by ../sync-shared.sh).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: dmocrp-lib
+    namespace: dmocrp
+    files:
+      - ingress_host.py

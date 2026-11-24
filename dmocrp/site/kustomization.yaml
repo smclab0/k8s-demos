@@ -1,0 +1,17 @@
+# The DMOCRP homepage. Fleet builds this directory (../fleet.yaml), and so
+# does ../deploy.sh, through ../kustomization.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../common
+  - dmocrp.yaml
+  - rbac.yaml
+configMapGenerator:
+  - name: dmocrp-script
+    namespace: dmocrp
+    files:
+      - dmocrp.py
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dmocrp
+    includeSelectors: false

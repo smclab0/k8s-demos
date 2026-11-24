@@ -1,19 +1,6 @@
-# DMOCRP, the DemoCorp group homepage, with the promo video.
+# DMOCRP, the DemoCorp group homepage, with the promo video. Everything is
+# in site/ (Fleet builds that directory; see fleet.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - site/dmocrp.yaml
-  - site/rbac.yaml
-configMapGenerator:
-  - name: dmocrp-script
-    namespace: dmocrp
-    files:
-      - site/dmocrp.py
-  - name: dmocrp-lib
-    namespace: dmocrp
-    files:
-      - common/ingress_host.py
-labels:
-  - pairs:
-      app.kubernetes.io/part-of: dmocrp
-    includeSelectors: false
+  - site
