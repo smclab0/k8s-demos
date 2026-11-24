@@ -1,0 +1,16 @@
+# The CRM on its own, without the shared locales and modules, so a cluster
+# can run it next to the branch kiosk (../../targets). ../base adds them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - crm.yaml
+  - rbac.yaml
+configMapGenerator:
+  - name: dmobnk-crm-script
+    namespace: dmobnk
+    files:
+      - crm.py
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dmobnk
+    includeSelectors: false

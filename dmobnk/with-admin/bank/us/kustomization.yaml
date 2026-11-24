@@ -1,7 +1,0 @@
-# the online bank for country "us", plus the Kube Power control room (role=admin).
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ../../../countries/us
-components:
-  - ../../../admin/bank

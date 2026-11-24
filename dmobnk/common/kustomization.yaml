@@ -1,6 +1,7 @@
-# ingress_host.py, shared by the online bank (../base) and the branch
-# counter (../branch/base): it points their Ingress at whatever cluster
-# they're running on. Mounted at /opt/dmobnk in both apps' web pods.
+# Python modules shared by DMOBNK's apps, mounted at /opt/dmobnk:
+#   ingress_host.py  points an app's Ingress at the cluster it runs on
+#   redis_lite.py    a tiny Redis client (kiosk and CRM)
+#   crm_feed.py      sends bank and kiosk events to a linked CRM
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 configMapGenerator:
@@ -8,3 +9,5 @@ configMapGenerator:
     namespace: dmobnk
     files:
       - ingress_host.py
+      - redis_lite.py
+      - crm_feed.py

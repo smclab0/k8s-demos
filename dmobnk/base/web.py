@@ -14,11 +14,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, "/opt/dmobnk")
 import ingress_host  # noqa: E402  (mounted from the dmobnk-ingress-host ConfigMap)
+import crm_feed  # noqa: E402  (the same: sends events to a linked CRM)
 
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 T = L["t"]
+# The signed-in online banking customer, as the CRM knows them (the first
+# demo customer of this country, shared with the branch kiosk).
+ONLINE_CUSTOMER = {"id": L["kiosk"]["customers"][0]["id"], "name": L["kiosk"]["customers"][0]["name"]}
 BASE = "/dmobnk/"
-# Set only where Kube Power runs (role=admin clusters, see ../admin/bank).
+# Set only where Kube Power runs (admin=true clusters, see ../admin/bank).
 _admin = os.environ.get("KUBE_POWER_URL", "")
 ADMIN_LINK = f'<a href="{html.escape(_admin)}" style="color:#4a5a7d">Admin</a>' if _admin else ""
 # Old per-country links (/dmobnk/de/cards etc.) redirect to the same page.
@@ -531,9 +535,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if rest == "api/card/freeze":
                 code, res = svc("cards-svc", "/freeze", "POST")
+                if code == 200:
+                    crm_feed.send("card_freeze", "Froze their card in online banking." if res.get("frozen")
+                                  else "Unfroze their card in online banking.", ONLINE_CUSTOMER, frozen=bool(res.get("frozen")))
                 return self._json(code, res)
             if rest == "api/mortgage/apply":
                 code, res = svc("mortgage-svc", "/apply", "POST")
+                if code == 200:
+                    crm_feed.send("mortgage_aip", f"Applied online for a mortgage agreement in principle (ref {res.get('id')}).",
+                                  ONLINE_CUSTOMER, ref=res.get("id"))
                 return self._json(code, {"id": res["id"]} if code == 200 else {"error": T["error"]})
         except Exception:
             return self._json(503, {"error": T["error"]})
@@ -543,5 +553,6 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+crm_feed.SOURCE.update(app="bank", where="Online banking")
 ingress_host.start("dmobnk", "dmobnk", os.environ.get("SITE_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

@@ -1,7 +1,7 @@
 # Kube Power, the admin control room, as its own Deployment. A Component:
 # ../bank and ../branch add it to the online bank or the branch kiosk, and
-# set what it may control. Only the role=admin / role=branch-admin overlays
-# (../../with-admin) use them, so other clusters don't run it at all.
+# set what it may control. Only the admin=true overlays (../../targets)
+# use them, so other clusters don't run it at all.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 resources:

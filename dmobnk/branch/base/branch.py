@@ -1,6 +1,5 @@
 """DMOBNK branch kiosk: a self-service screen for one retail branch,
-deployed by Fleet to clusters labelled dmobnk.smclab.net/role=branch (or
-role=branch).
+deployed by Fleet to clusters labelled branch=true.
 
 Customers use it on their own. With a (demo) card and PIN they can check
 their balance and print a mini statement, withdraw or pay in cash, move
@@ -20,7 +19,6 @@ import json
 import os
 import random
 import secrets
-import socket
 import sys
 import threading
 import time
@@ -29,6 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, "/opt/dmobnk")
 import ingress_host  # noqa: E402  (mounted from the dmobnk-ingress-host ConfigMap)
+from redis_lite import Redis  # noqa: E402  (the same)
+import crm_feed  # noqa: E402  (the same: sends events to a linked CRM)
 
 L = json.load(open("/locale/locale.json", encoding="utf-8"))
 B = L["b"]
@@ -51,74 +51,6 @@ SLOT_TIMES = ["09:30", "10:30", "11:30", "12:30", "14:00", "15:00", "16:00"]
 
 
 # ---------------------------------------------------------------- redis
-class Redis:
-    """Just enough of the Redis protocol for this app, so the image needs
-    no pip install (branch clusters may have no internet beyond images)."""
-
-    def __init__(self, host, port=6379):
-        self.addr = (host, port)
-        self.lock = threading.Lock()
-        self.sock = None
-        self.buf = b""
-
-    def _line(self):
-        while b"\r\n" not in self.buf:
-            chunk = self.sock.recv(65536)
-            if not chunk:
-                raise ConnectionError("redis closed the connection")
-            self.buf += chunk
-        line, self.buf = self.buf.split(b"\r\n", 1)
-        return line
-
-    def _exact(self, n):
-        while len(self.buf) < n + 2:
-            chunk = self.sock.recv(65536)
-            if not chunk:
-                raise ConnectionError("redis closed the connection")
-            self.buf += chunk
-        data, self.buf = self.buf[:n], self.buf[n + 2:]
-        return data
-
-    def _reply(self):
-        line = self._line()
-        kind, rest = line[:1], line[1:]
-        if kind == b"+":
-            return rest.decode()
-        if kind == b"-":
-            raise RuntimeError(rest.decode())
-        if kind == b":":
-            return int(rest)
-        if kind == b"$":
-            n = int(rest)
-            return None if n < 0 else self._exact(n).decode()
-        if kind == b"*":
-            n = int(rest)
-            return None if n < 0 else [self._reply() for _ in range(n)]
-        raise ConnectionError("bad redis reply")
-
-    def __call__(self, *args):
-        out = b"*%d\r\n" % len(args)
-        for a in args:
-            a = str(a).encode()
-            out += b"$%d\r\n%s\r\n" % (len(a), a)
-        with self.lock:
-            for attempt in (0, 1):
-                try:
-                    if self.sock is None:
-                        self.sock = socket.create_connection(self.addr, timeout=3)
-                        self.buf = b""
-                    self.sock.sendall(out)
-                    return self._reply()
-                except (OSError, ConnectionError):
-                    try:
-                        self.sock.close()
-                    except Exception:
-                        pass
-                    self.sock = None
-                    if attempt:
-                        raise
-
-
 r = Redis(os.environ.get("REDIS_HOST", "branch-redis"))
 
 
@@ -242,6 +174,7 @@ def sign_in(card, pin):
     r("DEL", tries_key)
     token = secrets.token_urlsafe(18)
     r("SET", f"branch:sess:{token}", cid, "EX", SESSION_S)
+    crm_feed.send("kiosk_signin", "Signed in at the kiosk.", cust(cid))
     return 200, {"token": token, **accounts_view(cid)}
 
 
@@ -268,6 +201,7 @@ def withdraw(cid, body):
     if left < 0:
         return 409, {"error": {-1: B["err_funds"], -2: B["err_cash"], -3: "limit"}[left]}
     add_tx(cid, acct, B["tx_withdraw"], -minor)
+    feed("withdraw", f"Withdrew {money(minor)} cash at the kiosk.", cid, [(acct, left)], [(acct, B["tx_withdraw"], -minor)])
     return 200, receipt(B["withdraw_h"], cid, acct, [[B["tx_withdraw"], minor / 100, "money"]], left)
 
 
@@ -283,6 +217,7 @@ def deposit(cid, body):
     r("SET", "branch:cash", KIOSK_CASH, "NX")
     r("INCRBY", "branch:cash", minor)
     add_tx(cid, acct, B["tx_deposit"], minor)
+    feed("deposit", f"Paid in {money(minor)} cash at the kiosk.", cid, [(acct, new)], [(acct, B["tx_deposit"], minor)])
     return 200, receipt(B["deposit_h"], cid, acct, [[B["tx_deposit"], minor / 100, "money"]], new)
 
 
@@ -302,6 +237,9 @@ def transfer(cid, body):
     sname, dname = ACCOUNTS[src][1]["name"], ACCOUNTS[dst][1]["name"]
     add_tx(cid, src, B["tx_out"].replace("{acct}", dname), -minor)
     add_tx(cid, dst, B["tx_in"].replace("{acct}", sname), minor)
+    feed("transfer", f"Moved {money(minor)} from {sname} to {dname} at the kiosk.", cid,
+         [(src, left), (dst, balance(dst))], [(src, B["tx_out"].replace("{acct}", dname), -minor),
+                                             (dst, B["tx_in"].replace("{acct}", sname), minor)])
     return 200, receipt(B["transfer_h"], cid, src,
                         [[B["from"], sname, "text"], [B["to"], dname, "text"], [B["amount"], minor / 100, "money"]], left)
 
@@ -319,6 +257,8 @@ def pay_bill(cid, body):
     if left < 0:
         return 409, {"error": B["err_funds"]}
     add_tx(cid, acct, B["tx_bill"].replace("{payee}", payee["name"]), -minor)
+    feed("bill", f"Paid {money(minor)} to {payee['name']} at the kiosk.", cid, [(acct, left)],
+         [(acct, B["tx_bill"].replace("{payee}", payee["name"]), -minor)])
     return 200, receipt(B["bill_h"], cid, acct, [[B["payee"], payee["name"], "text"], [B["amount"], minor / 100, "money"]], left)
 
 
@@ -328,6 +268,7 @@ def take_ticket(svc):
     r("EXPIRE", k(f"seq:{svc}"), 172800)
     ahead = r("RPUSH", k("queue"), json.dumps({"no": f"{svc}{n:03d}", "svc": svc, "t": int(time.time())})) - 1
     r("EXPIRE", k("queue"), 172800)
+    crm_feed.send("ticket", f"Ticket {svc}{n:03d} taken for {B['svc_' + svc]} ({ahead} waiting ahead).")
     return {"no": f"{svc}{n:03d}", "svc": svc, "ahead": ahead,
             "minutes": max(1, -(-ahead * ADVANCE_EVERY // 60))}
 
@@ -382,12 +323,25 @@ def book(body):
     if t not in free or not r("HSETNX", f"branch:appt:{d.isoformat()}", t, json.dumps({"name": name, "topic": topic})):
         return 409, {"error": B["slot_gone"]}
     r("EXPIRE", f"branch:appt:{d.isoformat()}", 4 * 86400)
+    crm_feed.send("appointment", f"{name} booked an appointment ({K['topics'][topic]}) for {d.isoformat()} at {t}.",
+                  None, name=name, topic=topic, topic_name=K["topics"][topic], date=d.isoformat(), time=t)
     return 200, {"date": d.isoformat(), "time": t, "topic": K["topics"][topic], "ref": ref()}
 
 
 # ---------------------------------------------------------------- page
 def e(s):
     return html.escape(str(s), quote=True)
+
+
+def cust(cid):
+    return {"id": cid, "name": CUSTOMERS[cid]["name"]}
+
+
+def feed(kind, text, cid, balances, txs):
+    """A kiosk transaction for the CRM: what happened, the new balances and
+    the statement lines (amounts in minor units)."""
+    crm_feed.send(kind, text, cust(cid), balances=[{"id": a, "balance": v / 100} for a, v in balances],
+                  tx=[{"acct": a, "desc": d, "amount": v / 100} for a, d, v in txs])
 
 
 def money(minor):
@@ -989,5 +943,6 @@ try:
 except Exception as err:  # redis not up yet: seed() runs again on first use
     print(f"seed postponed: {err}", flush=True)
 threading.Thread(target=advance_loop, daemon=True).start()
+crm_feed.SOURCE.update(app="kiosk", where=BRANCH)
 ingress_host.start("branch-web", "branch", os.environ.get("BRANCH_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

@@ -1,6 +1,6 @@
 """Points a DMOBNK Ingress at the cluster it's running on, so the same
 manifests work on any cluster: shared by the online bank (web.py) and the
-branch counter (branch.py), mounted from the dmobnk-ingress-host ConfigMap.
+branch kiosk (branch.py) and the CRM (crm.py), mounted from the dmobnk-ingress-host ConfigMap.
 
 start() runs a background loop that, while the Ingress carries the
 annotation dmobnk.smclab.net/host: auto, sets

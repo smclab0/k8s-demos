@@ -1,0 +1,64 @@
+# crm-web keeps its password in the dmobnk-crm Secret, and points its own
+# Ingress at the cluster's external address (see
+# ../../common/ingress_host.py): it may read and patch that one Ingress, list
+# Services to find the ingress controller's LoadBalancer EXTERNAL-IP, read
+# its node's address and see which IngressClasses the cluster has.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crm-web
+  namespace: dmobnk
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: crm-web
+  namespace: dmobnk
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["crm-web"]
+    verbs: ["get", "patch"]
+  # Its password and ingest token: read the dmobnk-crm Secret, or create it
+  # on first start.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["dmobnk-crm"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: crm-web
+  namespace: dmobnk
+subjects:
+  - {kind: ServiceAccount, name: crm-web, namespace: dmobnk}
+roleRef: {kind: Role, name: crm-web, apiGroup: rbac.authorization.k8s.io}
+---
+# Nodes, IngressClasses and Services in other namespaces need a ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dmobnk-crm-web
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+  # The ingress controller's LoadBalancer Service, for its EXTERNAL-IP.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dmobnk-crm-web
+subjects:
+  - {kind: ServiceAccount, name: crm-web, namespace: dmobnk}
+roleRef: {kind: ClusterRole, name: dmobnk-crm-web, apiGroup: rbac.authorization.k8s.io}

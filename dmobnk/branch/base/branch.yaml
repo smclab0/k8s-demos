@@ -1,5 +1,5 @@
 # The DMOBNK branch kiosk: deployed instead of the online bank on clusters
-# labelled dmobnk.smclab.net/role=branch (see ../../fleet.yaml).
+# labelled branch=true (see ../../fleet.yaml).
 #
 # Optional per-cluster settings live in a `dmobnk-branch` ConfigMap that
 # isn't in git (create it with kubectl, then restart branch-web):
@@ -44,11 +44,14 @@ spec:
             - {name: script, mountPath: /app, readOnly: true}
             - {name: locale, mountPath: /locale, readOnly: true}
             - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
+            - {name: crm-link, mountPath: /etc/dmobnk-crm, readOnly: true}
       volumes:
         - {name: script, configMap: {name: dmobnk-branch-script}}
         - {name: locale, configMap: {name: locale-uk}}
-        # Keep lib last: the country overlays patch volumes/1 (locale).
+        # Keep locale second: the country overlays patch volumes/1.
         - {name: lib, configMap: {name: dmobnk-ingress-host}}
+        # Linking to a CRM (../../common/crm_feed.py). Optional: no Secret, no events.
+        - {name: crm-link, secret: {secretName: dmobnk-crm-link, optional: true}}
 ---
 apiVersion: v1
 kind: Service

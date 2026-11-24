@@ -1,5 +1,5 @@
 """Serves Kube Power (control.py) as its own small Deployment, so only
-clusters labelled role=admin or role=branch-admin run it, and the public web
+clusters labelled admin=true run it, and the public web
 pods never hold its permissions. Its Ingress shares the app's host and takes
 the ADMIN_BASE path (/dmobnk/admin on the bank, /admin on the kiosk); it
 points that Ingress at the cluster the same way the apps do

@@ -1,7 +1,7 @@
 """Kube Power: DMOBNK's admin-only control room. It runs as its own
 kube-power Deployment (kube_power.py serves it), deployed only to clusters
-labelled role=admin (the online bank, at /dmobnk/admin) or
-role=branch-admin (the branch kiosk, at /admin); see ../../fleet.yaml.
+labelled admin=true: at /dmobnk/admin on the online bank, at /admin on a
+kiosk or CRM cluster; see ../../fleet.yaml.
 
 It shows the dmobnk namespace live (pods by node, deployments, the
 autoscaler, events) and lets a signed-in admin break things to show

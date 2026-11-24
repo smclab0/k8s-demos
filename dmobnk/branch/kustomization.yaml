@@ -1,6 +1,5 @@
-# The default branch deployment: the UK branch, in pounds sterling. Other
-# countries are overlays in countries/<cc>/; Fleet picks one from the
-# cluster's dmobnk.smclab.net/country label (see ../fleet.yaml).
+# The UK branch kiosk, in pounds sterling. Fleet and deploy.sh use
+# ../targets/branch*/<cc> instead, which also set the country.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

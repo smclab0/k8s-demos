@@ -1,0 +1,110 @@
+# The DMOBNK CRM: staff's customer and sales app, deployed instead of the
+# online bank on clusters labelled crm=true (see ../../fleet.yaml).
+#
+# Optional per-cluster settings live in a `dmobnk-crm-site` ConfigMap that
+# isn't in git (create it with kubectl, then restart crm-web):
+#   host          the Ingress host (default: crm.<external address>.sslip.io)
+#   ingressClass  the IngressClass (default: the cluster's default class)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crm-web
+  namespace: dmobnk
+  labels: {app: crm-web, dmobnk.smclab.net/tier: crm}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: crm-web}}
+  template:
+    metadata:
+      labels: {app: crm-web, dmobnk.smclab.net/tier: crm}
+    spec:
+      serviceAccountName: crm-web
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: crm-web}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/crm.py"]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - name: CRM_HOST
+              valueFrom: {configMapKeyRef: {name: dmobnk-crm-site, key: host, optional: true}}
+            - name: INGRESS_CLASS
+              valueFrom: {configMapKeyRef: {name: dmobnk-crm-site, key: ingressClass, optional: true}}
+          # Ready once it has its password (from the dmobnk-crm Secret).
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: locale, mountPath: /locale, readOnly: true}
+            - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmobnk-crm-script}}
+        - {name: locale, configMap: {name: locale-uk}}
+        # Keep lib last: the country overlays patch volumes/1 (locale).
+        - {name: lib, configMap: {name: dmobnk-ingress-host}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: crm-web, namespace: dmobnk}
+spec: {selector: {app: crm-web}, ports: [{port: 80, targetPort: 8080}]}
+---
+# Customers, pipeline, tasks and history. Example data, so no volume: a
+# restart makes the example data again (notes and live events are lost).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crm-redis
+  namespace: dmobnk
+  labels: {app: crm-redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: crm-redis}}
+  template:
+    metadata: {labels: {app: crm-redis}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: 6379}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: crm-redis, namespace: dmobnk}
+spec: {selector: {app: crm-redis}, ports: [{port: 6379, targetPort: 6379}]}
+---
+# Only the CRM may talk to its Redis.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: crm-redis, namespace: dmobnk}
+spec:
+  podSelector: {matchLabels: {app: crm-redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: crm-web}}}]
+      ports: [{port: 6379}]
+---
+# The host here is a placeholder: crm-web sets it (and the class, if the cluster has no default) once
+# running, because of the dmobnk.smclab.net/host annotation
+# (../../common/ingress_host.py).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crm-web
+  namespace: dmobnk
+  annotations:
+    dmobnk.smclab.net/host: auto
+spec:
+  rules:
+    - host: crm.node-ip.sslip.io
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: crm-web, port: {number: 80}}}}

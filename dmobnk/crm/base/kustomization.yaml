@@ -1,0 +1,7 @@
+# The CRM with the shared locale ConfigMaps and Python modules.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../locales
+  - ../../common
+  - ../app
