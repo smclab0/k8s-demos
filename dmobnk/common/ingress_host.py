@@ -1,15 +1,17 @@
 """Points a DMOBNK Ingress at the cluster it's running on, so the same
-manifests work on any cluster: shared by the online bank (web.py) and the
-branch kiosk (branch.py) and the CRM (crm.py), mounted from the dmobnk-ingress-host ConfigMap.
+manifests work on any cluster: shared by the online bank (web.py), the
+branch kiosk (branch.py), the CRM (crm.py) and Kube Power, mounted from the
+dmobnk-ingress-host ConfigMap.
 
 start() runs a background loop that, while the Ingress carries the
 annotation dmobnk.smclab.net/host: auto, sets
   - its host to <prefix>.<cluster external address>.sslip.io, or to a fixed
     host when one is configured (see cluster_address for the order), and
   - its IngressClass, when the cluster has no default class.
-An Ingress without the annotation (e.g. dev.smclab.net on lenny-new) is left
-alone. The ServiceAccount needs: get/patch on that Ingress, get on nodes,
-get and list on nodes, list on services and ingressclasses."""
+It creates the Ingress if it's missing (see ensure). An Ingress without the
+annotation (e.g. dev.smclab.net on lenny-new) is left alone. The
+ServiceAccount needs: create on ingresses, get/patch on that Ingress, get on
+its Deployment, get and list on nodes, list on services and ingressclasses."""
 import ipaddress
 import json
 import os
@@ -17,6 +19,7 @@ import socket
 import ssl
 import threading
 import time
+import urllib.error
 import urllib.request
 
 ANNOTATION = "dmobnk.smclab.net/host"
@@ -227,10 +230,42 @@ def ingress_class(current):
     return current
 
 
-def _loop(ingress, prefix, fixed_host, fixed_class, follow):
+def ensure(name, prefix, path, service, owner):
+    """Creates Ingress `name` if it doesn't exist, owned by Deployment `owner`
+    (so it goes when the app does). The app makes its own Ingress, rather
+    than shipping one in the Fleet bundle, because it rewrites the host: with
+    both Fleet (server-side apply) and the app owning .spec.rules, every Fleet
+    upgrade failed on the conflict."""
+    try:
+        k8s("GET", f"/apis/networking.k8s.io/v1/namespaces/{NS}/ingresses/{name}")
+        return
+    except urllib.error.HTTPError as err:
+        if err.code != 404:
+            raise
+    dep = k8s("GET", f"/apis/apps/v1/namespaces/{NS}/deployments/{owner}")
+    body = {
+        "apiVersion": "networking.k8s.io/v1", "kind": "Ingress",
+        "metadata": {"name": name, "namespace": NS, "annotations": {ANNOTATION: "auto"},
+                     "labels": {"app.kubernetes.io/part-of": NS},
+                     "ownerReferences": [{"apiVersion": "apps/v1", "kind": "Deployment", "name": owner,
+                                          "uid": dep["metadata"]["uid"], "blockOwnerDeletion": False}]},
+        "spec": {"rules": [{"host": f"{prefix}.node-ip.sslip.io", "http": {"paths": [
+            {"path": path, "pathType": "Prefix", "backend": {"service": {"name": service, "port": {"number": 80}}}}]}}]},
+    }
+    try:
+        k8s("POST", f"/apis/networking.k8s.io/v1/namespaces/{NS}/ingresses", body)
+        print(f"created Ingress {name} ({path} -> {service})", flush=True)
+    except urllib.error.HTTPError as err:
+        if err.code != 409:     # 409: another replica made it first
+            raise
+
+
+def _loop(ingress, prefix, fixed_host, fixed_class, follow, create):
     address, checked, ttl, source = None, 0.0, 0, None
     while True:
         try:
+            if create:
+                ensure(*create)
             ing = k8s("GET", ingress)
             if ing["metadata"].get("annotations", {}).get(ANNOTATION) != "auto":
                 time.sleep(30)
@@ -274,10 +309,14 @@ def _loop(ingress, prefix, fixed_host, fixed_class, follow):
         time.sleep(10)
 
 
-def start(name, prefix, fixed_host="", fixed_class="", follow=""):
-    """Keep Ingress `name` (in this pod's namespace) pointed at this cluster."""
+def start(name, prefix, fixed_host="", fixed_class="", follow="", path="/", service="", owner=""):
+    """Keep Ingress `name` (in this pod's namespace) pointed at this cluster,
+    creating it (path -> service:80, owned by Deployment `owner`) if it's
+    missing. An existing Ingress without the auto annotation (e.g. the static
+    one for dev.smclab.net) is left alone."""
     if not os.path.exists(f"{SA}/token"):
         return
     ingress = f"/apis/networking.k8s.io/v1/namespaces/{NS}/ingresses/{name}"
-    threading.Thread(target=_loop, args=(ingress, prefix, fixed_host.strip(), fixed_class.strip(), follow.strip()),
+    threading.Thread(target=_loop, args=(ingress, prefix, fixed_host.strip(), fixed_class.strip(), follow.strip(),
+                                                      (name, prefix, path, service or name, owner or service or name)),
                      daemon=True).start()

@@ -33,7 +33,7 @@ SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 ENABLED = os.path.exists(f"{SA}/token")
 PASSWORD = ""                    # set by init() from the dmobnk-admin Secret
 _KEY = b""
-SECRET = "dmobnk-admin"
+SECRET = os.environ.get("ADMIN_SECRET", "dmobnk-admin")   # DMOSHP uses dmoshp-admin
 # The demo password every new dmobnk-admin Secret starts with (the user's
 # choice: one known password for all of DMOBNK's demo sign-ins).
 DEMO_PASSWORD = "dmopwd1"
@@ -51,6 +51,7 @@ def _env_list(name, default):
 BASE = os.environ.get("ADMIN_BASE", "/dmobnk/admin").rstrip("/")
 APP_URL = os.environ.get("APP_URL", "/dmobnk/")
 APP_NAME = os.environ.get("APP_NAME", "the bank")
+ORG = os.environ.get("ORG_NAME", "DMOBNK")      # whose control room: DMOBNK, or DMOSHP (../../../dmoshp)
 # The deployments the controls may touch. Redis is never in the list: it
 # holds the app's state and runs as a single pod.
 APPS = _env_list("ADMIN_APPS", "web,accounts-svc,cards-svc,loans-svc,mortgage-svc,rates-svc,crossborder-svc")
@@ -105,7 +106,7 @@ def init():
                 try:
                     k8s("POST", f"/api/v1/namespaces/{NS}/secrets", {
                         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-                        "metadata": {"name": SECRET, "labels": {"app.kubernetes.io/part-of": "dmobnk"}},
+                        "metadata": {"name": SECRET, "labels": {"app.kubernetes.io/part-of": NS}},
                         "stringData": {"password": pw}})
                     print(f"created the {SECRET} Secret with a new admin password", flush=True)
                 except K8sError as err2:
@@ -246,8 +247,36 @@ def scale(app, replicas):
         return 400, {"error": f"Pick between {SCALE_MIN} and {SCALE_MAX} replicas."}
     k8s("PATCH", f"/apis/apps/v1/namespaces/{NS}/deployments/{app}/scale",
         {"spec": {"replicas": replicas}}, "application/merge-patch+json")
+    k8s("PATCH", f"/apis/apps/v1/namespaces/{NS}/deployments/{app}",
+        {"metadata": {"annotations": {SCALED_TO: str(replicas)}}}, "application/merge-patch+json")
     _forget("deps", "pods")
     return 200, {"message": f"Scaling {app} to {replicas} pods."}
+
+
+# Fleet doesn't set replica counts where Kube Power runs (with both writing
+# .spec.replicas, Fleet's server-side apply refused every upgrade). Instead
+# the manifests carry the starting count in an annotation, and Kube Power
+# keeps each deployment at the count last chosen here, or that start.
+REPLICAS = "dmobnk.smclab.net/replicas"
+SCALED_TO = "dmobnk.smclab.net/scaled-to"
+
+
+def keep_replicas():
+    while True:
+        if ENABLED and PASSWORD:
+            try:
+                for d in k8s("GET", f"/apis/apps/v1/namespaces/{NS}/deployments")["items"]:
+                    name, ann = d["metadata"]["name"], d["metadata"].get("annotations") or {}
+                    want = ann.get(SCALED_TO) or ann.get(REPLICAS)
+                    if name not in APPS or name in HPA_APPS or not (want or "").isdigit():
+                        continue
+                    if int(want) != d["spec"].get("replicas"):
+                        k8s("PATCH", f"/apis/apps/v1/namespaces/{NS}/deployments/{name}/scale",
+                            {"spec": {"replicas": int(want)}}, "application/merge-patch+json")
+                        print(f"set {name} to {want} replicas", flush=True)
+            except Exception as err:
+                print(f"couldn't check replica counts: {err}", flush=True)
+        time.sleep(15)
 
 
 def kill(app):
@@ -428,6 +457,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 .mono{font-family:"JetBrains Mono",ui-monospace,monospace}
 .disp{font-family:"Space Grotesk",Inter,sans-serif}
 .wrap{max-width:1360px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.credit{text-align:center;font-size:12px;color:#6a7896;padding:0 16px 22px}
+.demo{background:#fdecd0;color:#5c3a00;font-size:13px}.demo .wrap{display:flex;gap:10px;align-items:center;padding-block:7px}
+.demo b{background:#8a4b00;color:#fff;border-radius:6px;padding:1px 8px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;flex:none}
 header{background:#0b1b3a;color:#fff}
 header .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-block:14px}
 .brand{display:flex;align-items:center;gap:12px;color:#fff;text-decoration:none}
@@ -495,7 +527,7 @@ aside{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:14px}
 .ev td{padding:9px 10px;border-bottom:1px solid #edf1f8;vertical-align:top}
 .ev td:first-child,.ev td:nth-child(3){font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap}
 .ev td:first-child{color:#4a5a7d}
-.login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.login{min-height:calc(100vh - 90px);display:grid;place-items:center;padding:16px}
 .login form{background:#fff;border-radius:20px;padding:28px;width:min(400px,100%);display:flex;flex-direction:column;gap:14px}
 .login input{height:44px;border:1px solid #c9d3e8;border-radius:12px;padding:0 12px;width:100%}
 .login label{font-size:13px;font-weight:600}
@@ -511,6 +543,9 @@ FONTS = ('<link rel="preconnect" href="https://fonts.googleapis.com">'
          '&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">')
 
 
+BANNER = "This is a demo app showing external control of a Rancher managed k8s environment."
+
+
 def _doc(title, body, js=""):
     return f"""<!doctype html>
 <html lang="en">
@@ -523,7 +558,9 @@ def _doc(title, body, js=""):
 <style>{CSS}</style>
 </head>
 <body>
+<div class="demo" role="note"><div class="wrap"><b>Demo</b><span>{e(BANNER)}</span></div></div>
 {body}
+<footer class="credit">Created By Steve McBride</footer>
 <script>{js}</script>
 </body>
 </html>"""
@@ -536,13 +573,13 @@ def login_page(error=""):
     else:
         msg = {"wrong": "That password isn't right.",
                "locked": "Too many tries. Wait five minutes and try again."}.get(error, "")
-        inner = f"""<p class="muted" style="font-size:14px">Admins only. Sign in to see and control the cluster behind the bank.</p>
+        inner = f"""<p class="muted" style="font-size:14px">Admins only. Sign in to see and control the cluster behind {e(APP_NAME)}.</p>
 <div style="display:flex;flex-direction:column;gap:6px"><label for="pw">Admin password</label>
 <input id="pw" name="password" type="password" autocomplete="current-password" required autofocus></div>
 {f'<p role="alert" style="color:#b42335;font-weight:600;font-size:14px">{e(msg)}</p>' if msg else ''}
 <button class="btn" type="submit">Sign in</button>"""
     body = f"""<main class="login"><form method="post" action="{BASE}/login">
-<div class="brand" style="color:#0b1b3a">{LOGO}<span><b>Kube Power</b><small style="color:#4a5a7d">DMOBNK control room</small></span></div>
+<div class="brand" style="color:#0b1b3a">{LOGO}<span><b>Kube Power</b><small style="color:#4a5a7d">{e(ORG)} control room</small></span></div>
 {inner}
 <a href="{e(APP_URL)}" style="font-size:14px">Back to {e(APP_NAME)}</a>
 </form></main>"""
@@ -608,14 +645,14 @@ def control_page():
 {SURGE_HTML}    </aside>
   </div>
   <section class="panel" aria-labelledby="ev-h">
-    <div class="headrow"><h2 id="ev-h">What Kubernetes just did</h2><span class="muted" style="font-size:13px">Events in the dmobnk namespace, newest first</span></div>
+    <div class="headrow"><h2 id="ev-h">What Kubernetes just did</h2><span class="muted" style="font-size:13px">Events in the {e(NS)} namespace, newest first</span></div>
     <div class="scroll"><table class="ev"><thead><tr><th>Time</th><th>Reason</th><th>Object</th><th>What happened</th></tr></thead><tbody id="events"></tbody></table></div>
   </section>
-  <p class="muted" style="font-size:12px">Controls are limited to the dmobnk namespace and these deployments: {e(", ".join(APPS))}. Redis isn't offered: it holds the app's state.</p>
+  <p class="muted" style="font-size:12px">Controls are limited to the {e(NS)} namespace and these deployments: {e(", ".join(APPS))}. Redis isn't offered: it holds the app's state.</p>
 </main>
 <style>.sr{{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}}</style>"""
     cfg = json.dumps({"base": BASE, "apps": APPS, "hpa": sorted(HPA_APPS), "min": SCALE_MIN, "max": SCALE_MAX})
-    return _doc("Kube Power · DMOBNK control room", body, "const CFG = " + cfg.replace("</", "<\\/") + ";\n" + CONTROL_JS)
+    return _doc(f"Kube Power · {ORG} control room", body, "const CFG = " + cfg.replace("</", "<\\/") + ";\n" + CONTROL_JS)
 
 
 CONTROL_JS = r"""

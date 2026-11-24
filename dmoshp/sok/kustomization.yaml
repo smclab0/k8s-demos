@@ -1,0 +1,14 @@
+# The self-checkout on its own; ../base adds what the apps share.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - sok.yaml
+configMapGenerator:
+  - name: dmoshp-sok-script
+    namespace: dmoshp
+    files:
+      - sok.py
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dmoshp
+    includeSelectors: false

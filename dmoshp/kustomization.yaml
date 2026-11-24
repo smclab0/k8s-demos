@@ -1,0 +1,8 @@
+# The default deployment: the online shop, for a cluster with no DMOSHP
+# labels. Other clusters get targets/<combo> (see fleet.yaml and
+# targets/generate.py).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base
+  - shop

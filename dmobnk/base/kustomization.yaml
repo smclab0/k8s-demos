@@ -8,7 +8,6 @@ resources:
   - services.yaml
   - web.yaml
   - rates-cron.yaml
-  - ingress.yaml
   - rbac.yaml
 
 # web.py lives as a plain file; the generated ConfigMap gets a content hash in

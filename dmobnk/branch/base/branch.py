@@ -360,6 +360,7 @@ ERRORS = {"amount": lambda: B["err_amount"].replace("{min}", money(1)).replace("
 CSS = """
 *{box-sizing:border-box}
 html,body{height:100%}
+.credit{text-align:center;font-size:12px;color:#6a7896;padding:6px 16px 10px;flex:none}
 body{margin:0;background:#eef2fa;color:#0b1b3a;font:17px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;-webkit-tap-highlight-color:transparent;user-select:none}
 button,input{font:inherit;color:inherit}
 button{cursor:pointer}
@@ -610,6 +611,7 @@ def kiosk_page():
 <div class="demo" role="note"><div><b>{e(T['demo_label'])}</b><span>{e(T['demo_banner'])}</span></div></div>
 <header><div class="in"><div class="logo">{LOGO}<span><b>DMOBNK</b><small>{e(BRANCH)} · {e(B['title'])}</small></span></div><span class="clock" id="clock"></span></div></header>
 <main>{body}</main>
+<footer class="credit">Created By Steve McBride</footer>
 <script id="cfg" type="application/json">{cfg_json}</script>
 <script>{KIOSK_JS}</script>
 </body>
@@ -944,5 +946,6 @@ except Exception as err:  # redis not up yet: seed() runs again on first use
     print(f"seed postponed: {err}", flush=True)
 threading.Thread(target=advance_loop, daemon=True).start()
 crm_feed.SOURCE.update(app="kiosk", where=BRANCH)
-ingress_host.start("branch-web", "branch", os.environ.get("BRANCH_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
+ingress_host.start("branch-web", "branch", os.environ.get("BRANCH_HOST", ""), os.environ.get("INGRESS_CLASS", ""),
+                   path="/", service="branch-web", owner="branch-web")
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

@@ -78,6 +78,39 @@ data:
             "spend": [["2026-11-22", "Borough Market", 18.40], ["2026-11-21", "TfL Travel", 7.80],
                       ["2026-11-20", "Waterstones", 24.99], ["2026-11-19", "Pret A Manger", 6.35]]}
 
+    def card_now():
+        """CARD plus what's been spent on it since (DMOSHP card payments)."""
+        new = [json.loads(x) for x in r.lrange("card_spend", 0, 19)]
+        extra = float(r.get("card_spent") or 0)
+        return dict(CARD, balance_gbp=round(CARD["balance_gbp"] + extra, 2), spend=new + CARD["spend"],
+                    frozen=r.get("card_frozen") == "1", pod=POD)
+
+    def card_authorise(b):
+        """A card payment from a merchant (DMOSHP's shop or self-checkout, in
+        GBP). Declined while the card is frozen in online banking, or over
+        the available credit."""
+        if str(b.get("last4", "")) != CARD["last4"]:
+            return 404, {"approved": False, "reason": "Unknown card"}
+        try:
+            amount = round(float(b.get("amount")), 2)
+        except (TypeError, ValueError):
+            return 400, {"approved": False, "reason": "Bad amount"}
+        if not 0 < amount <= 10000:
+            return 400, {"approved": False, "reason": "Bad amount"}
+        c = card_now()
+        if c["frozen"]:
+            return 200, {"approved": False, "reason": "Card frozen in online banking"}
+        if amount > c["limit_gbp"] - c["balance_gbp"]:
+            return 200, {"approved": False, "reason": "Over the available credit"}
+        merchant = str(b.get("merchant") or "Card payment")[:40]
+        pipe = r.pipeline()
+        pipe.lpush("card_spend", json.dumps([time.strftime("%Y-%m-%d"), merchant, amount]))
+        pipe.ltrim("card_spend", 0, 19)
+        pipe.incrbyfloat("card_spent", amount)
+        pipe.execute()
+        return 200, {"approved": True, "auth": secrets.token_hex(3).upper(), "pod": POD,
+                     "available": round(c["limit_gbp"] - c["balance_gbp"] - amount, 2)}
+
     # ---- mortgage: each agreement-in-principle runs as its own Kubernetes Job
     K8S = "https://kubernetes.default.svc"
     TOKEN = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -147,7 +180,7 @@ data:
                         burn(0.1)
                     return self._json(200, rates_get())
                 if SERVICE == "cards" and u.path == "/card":
-                    return self._json(200, dict(CARD, frozen=r.get("card_frozen") == "1", pod=POD))
+                    return self._json(200, card_now())
                 if SERVICE == "mortgage" and u.path == "/app":
                     a = r.hgetall(f"aip:{q.get('id', '')}")
                     if not a:
@@ -167,6 +200,8 @@ data:
                 if SERVICE == "rates" and u.path == "/refresh":
                     rates_refresh()
                     return self._json(200, {"ok": True, "pod": POD})
+                if SERVICE == "cards" and u.path == "/authorise":
+                    return self._json(*card_authorise(self._body()))
                 if SERVICE == "cards" and u.path == "/freeze":
                     frozen = r.get("card_frozen") != "1"
                     r.set("card_frozen", "1" if frozen else "0")

@@ -1,0 +1,38 @@
+# The store's stock and orders, shared by the online shop and every
+# self-checkout. Demo data only: nothing is persisted, and both apps seed
+# the stock again if it's empty.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-redis
+  namespace: dmoshp
+  labels: {app: shop-redis}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: shop-redis}}
+  template:
+    metadata: {labels: {app: shop-redis}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports: [{containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: 6379}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: shop-redis, namespace: dmoshp}
+spec: {selector: {app: shop-redis}, ports: [{port: 6379, targetPort: 6379}]}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: shop-redis, namespace: dmoshp}
+spec:
+  podSelector: {matchLabels: {app: shop-redis}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {dmoshp.smclab.net/tier: web}}}]
+      ports: [{port: 6379}]

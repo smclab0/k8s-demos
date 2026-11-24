@@ -55,7 +55,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 threading.Thread(target=control.init, daemon=True).start()
+threading.Thread(target=control.keep_replicas, daemon=True).start()
 ingress_host.start("kube-power", os.environ.get("HOST_PREFIX", "dmobnk"),
                    os.environ.get("SITE_HOST", ""), os.environ.get("INGRESS_CLASS", ""),
-                   follow=os.environ.get("FOLLOW_INGRESS", ""))
+                   follow=os.environ.get("FOLLOW_INGRESS", ""), path=BASE, service="kube-power", owner="kube-power")
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

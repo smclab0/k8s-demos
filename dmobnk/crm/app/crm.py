@@ -337,6 +337,10 @@ def ingest(ev):
             new_opp(cid, "mortgage", 250000, staff_for("mortgage"), stage="application", source="online")
         new_task(cid, f"Follow up {c['name'].split()[0]}'s mortgage application",
                  (date.today() + timedelta(days=1)).isoformat(), staff_for("mortgage"), by=by)
+    elif typ == "card_payment" and c and c.get("card") and _num(data.get("amount")) is not None:
+        # A DMOSHP purchase on the customer's DMOBNK card (../../../dmoshp).
+        c["card"]["balance"] = round((c["card"].get("balance") or 0) + _num(data["amount"]), 2)
+        jset(f"crm:cust:{cid}", c)
     elif typ == "card_freeze" and c and data.get("frozen"):
         new_task(cid, f"Call {c['name'].split()[0]}: card frozen in online banking", date.today().isoformat(),
                  c["owner"], by=by)
@@ -588,7 +592,7 @@ table{width:100%;border-collapse:collapse}th{font-size:12px;text-transform:upper
 td{padding:10px;border-bottom:1px solid #edf1f8;vertical-align:top}tr.click{cursor:pointer}tr.click:hover td{background:#f6f8fd}.num{text-align:right;font-variant-numeric:tabular-nums}
 .tw{overflow-x:auto}.badge{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;background:var(--blue-soft);color:var(--blue);white-space:nowrap}
 .b-Premier{background:#efe5ff;color:#6b2fd6}.b-Business{background:var(--amber-soft);color:#9a5200}.b-Prospect{background:var(--green-soft);color:#0a6b4b}.b-Everyday{background:#e9eef7;color:#41506f}
-.b-kiosk{background:var(--amber-soft);color:#9a5200}.b-bank{background:var(--blue-soft);color:var(--blue)}.b-overdue{background:var(--red-soft);color:var(--red)}.b-today{background:var(--amber-soft);color:#9a5200}
+.b-kiosk{background:var(--amber-soft);color:#9a5200}.b-bank{background:var(--blue-soft);color:var(--blue)}.b-shop{background:#e3f6ec;color:#11724a}.b-overdue{background:var(--red-soft);color:var(--red)}.b-today{background:var(--amber-soft);color:#9a5200}
 .feed{display:flex;flex-direction:column;max-height:430px;overflow:auto}.feed .it{display:flex;gap:10px;padding:10px 4px;border-bottom:1px solid #edf1f8;align-items:flex-start}
 .feed .it.new{animation:flash 2.4s ease}@keyframes flash{0%{background:#fff4d6}100%{background:transparent}}
 .feed .t{font-size:12px;color:var(--muted);white-space:nowrap;min-width:46px}.empty{color:var(--muted);padding:18px 4px;text-align:center}
@@ -614,7 +618,8 @@ td{padding:10px;border-bottom:1px solid #edf1f8;vertical-align:top}tr.click{curs
 .modal{position:fixed;inset:0;background:#0b1b3a80;display:grid;place-items:center;padding:16px;z-index:8}.modal .card{width:min(460px,100%);display:flex;flex-direction:column;gap:12px}
 .modal label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600;color:var(--ink2)}
 code.blk{display:block;background:var(--navy);color:#dfe6f7;border-radius:12px;padding:14px;white-space:pre-wrap;word-break:break-all;font-family:'JetBrains Mono',monospace;font-size:13px}
-.login{min-height:calc(100vh - 40px);display:grid;place-items:center;padding:16px}.login form{width:min(400px,100%);display:flex;flex-direction:column;gap:14px}
+.credit{text-align:center;font-size:12px;color:var(--muted);padding:0 16px 22px}
+.login{min-height:calc(100vh - 80px);display:grid;place-items:center;padding:16px}.login form{width:min(400px,100%);display:flex;flex-direction:column;gap:14px}
 .login label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px}.err{color:var(--red);font-weight:600;font-size:14px}
 """
 
@@ -628,7 +633,7 @@ def doc(title, body, js=""):
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <style>{CSS}</style></head><body>
 <div class="demo" role="note"><div><b>{e(T['demo_label'])}</b><span>{e(T['demo_banner'])}</span></div></div>
-{body}{f'<script>{js}</script>' if js else ''}</body></html>"""
+{body}<footer class="credit">Created By Steve McBride</footer>{f'<script>{js}</script>' if js else ''}</body></html>"""
 
 
 def login_page(err=""):
@@ -672,7 +677,8 @@ let META = null, view = null;
 const staffName = id => (META.staff.find(s => s.id === id) || {name: id}).name;
 const prodName = p => META.products[p] || p;
 function seg(s) { return el('span', 'badge b-' + s, s); }
-function srcBadge(app) { return el('span', 'badge b-' + (app === 'kiosk' ? 'kiosk' : 'bank'), app === 'kiosk' ? 'Kiosk' : app === 'bank' ? 'Online bank' : (app || 'Live')); }
+const SRC = {kiosk: ['kiosk', 'Kiosk'], bank: ['bank', 'Online bank'], shop: ['shop', 'DMOSHP online'], sok: ['shop', 'DMOSHP store']};
+function srcBadge(app) { const s = SRC[app] || ['bank', app || 'Live']; return el('span', 'badge b-' + s[0], s[1]); }
 function dueBadge(t, today) { if (t.done) return el('span', 'badge', 'Done'); if (t.due < today) return el('span', 'badge b-overdue', 'Overdue · ' + day(t.due)); if (t.due === today) return el('span', 'badge b-today', 'Today'); return el('span', 'badge', day(t.due)); }
 function custLink(cid, name) { const a = el('a', '', name || '—'); if (cid) a.href = '#/c/' + encodeURIComponent(cid); return a; }
 
@@ -1076,5 +1082,6 @@ def seed_loop():
 
 threading.Thread(target=init, daemon=True).start()
 threading.Thread(target=seed_loop, daemon=True).start()
-ingress_host.start("crm-web", "crm", os.environ.get("CRM_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
+ingress_host.start("crm-web", "crm", os.environ.get("CRM_HOST", ""), os.environ.get("INGRESS_CLASS", ""),
+                   path="/", service="crm-web", owner="crm-web")
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

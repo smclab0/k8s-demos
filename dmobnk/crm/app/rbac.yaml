@@ -19,6 +19,15 @@ rules:
     resources: ["ingresses"]
     resourceNames: ["crm-web"]
     verbs: ["get", "patch"]
+  # It creates its own Ingress (../common/ingress_host.py), owned by its
+  # Deployment, rather than Fleet shipping one.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["crm-web"]
+    verbs: ["get"]
   # Its password and ingest token: read the dmobnk-crm Secret, or create it
   # on first start.
   - apiGroups: [""]

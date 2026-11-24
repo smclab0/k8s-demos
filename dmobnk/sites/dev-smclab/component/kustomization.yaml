@@ -3,44 +3,11 @@
 # host (ingress-nginx merges the two and picks the longest matching path).
 # The overlays next to it (../uk, ../us, ../de, ../sim) add this component;
 # deploy.sh uses them. Fleet clusters never get it.
+#
+# These Ingresses are fixed (annotation dmobnk.smclab.net/host: "off"), so
+# the apps find them in place and leave them alone instead of creating
+# their own sslip.io ones (../../../common/ingress_host.py).
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
-patches:
-  - target: {kind: Ingress, name: dmobnk}
-    patch: |-
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: dmobnk
-        annotations:
-          dmobnk.smclab.net/host: "off"
-          cert-manager.io/cluster-issuer: letsencrypt-cloudflare
-      spec:
-        ingressClassName: nginx
-        tls:
-          - hosts: [dev.smclab.net]
-            secretName: dmobnk-tls
-        rules:
-          - host: dev.smclab.net
-            http:
-              paths:
-                - {path: /dmobnk, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
-  # Kube Power (../../../admin/bank) on the same host, under /dmobnk/admin.
-  - target: {kind: Ingress, name: kube-power}
-    patch: |-
-      apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      metadata:
-        name: kube-power
-        annotations:
-          dmobnk.smclab.net/host: "off"
-      spec:
-        ingressClassName: nginx
-        tls:
-          - hosts: [dev.smclab.net]
-            secretName: dmobnk-tls
-        rules:
-          - host: dev.smclab.net
-            http:
-              paths:
-                - {path: /dmobnk/admin, pathType: Prefix, backend: {service: {name: kube-power, port: {number: 80}}}}
+resources:
+  - ingress.yaml

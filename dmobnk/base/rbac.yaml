@@ -19,6 +19,15 @@ rules:
     resources: ["ingresses"]
     resourceNames: ["dmobnk"]
     verbs: ["get", "patch"]
+  # It creates its own Ingress (../common/ingress_host.py), owned by its
+  # Deployment, rather than Fleet shipping one.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["web"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

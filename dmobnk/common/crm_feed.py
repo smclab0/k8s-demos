@@ -6,11 +6,18 @@ CRM, when there is one:
     `url` and `token`, which the CRM's Connect page shows how to create.
 Both are optional Secret volumes, so they take effect within a minute or so
 of appearing, without a restart. With neither, events are dropped.
+An app in another namespace (DMOSHP's shop and self-checkout) sets
+CRM_NAMESPACE=dmobnk instead: it reads the token from that namespace's
+dmobnk-crm Secret through the API (its ServiceAccount may get that one
+Secret) and posts to the crm-web Service there.
 
 send() never blocks or raises: events go through a small queue, and a
 background thread posts them to <url>/api/ingest."""
+import base64
 import json
+import os
 import queue
+import ssl
 import threading
 import time
 import urllib.request
@@ -33,11 +40,36 @@ def _file(path):
         return ""
 
 
+CRM_NS = os.environ.get("CRM_NAMESPACE", "")
+_remote = {"t": 0.0, "token": ""}
+
+
+def _remote_token():
+    """The CRM's ingest token from CRM_NS's dmobnk-crm Secret, checked once a minute."""
+    if time.time() - _remote["t"] < 60:
+        return _remote["token"]
+    _remote["t"], token = time.time(), ""
+    try:
+        sa = "/var/run/secrets/kubernetes.io/serviceaccount"
+        req = urllib.request.Request(f"https://kubernetes.default.svc/api/v1/namespaces/{CRM_NS}/secrets/dmobnk-crm",
+                                     headers={"Authorization": f"Bearer {_file(sa + '/token')}"})
+        ctx = ssl.create_default_context(cafile=f"{sa}/ca.crt")
+        data = json.loads(urllib.request.urlopen(req, timeout=4, context=ctx).read()).get("data") or {}
+        token = base64.b64decode(data.get("token", "")).decode()
+    except Exception:
+        pass       # no CRM on this cluster (404) or not allowed: events are dropped
+    _remote["token"] = token
+    return token
+
+
 def target():
     """(url, token) of the CRM to send to, or ("", "")."""
     url, token = _file(f"{LINK}/url"), _file(f"{LINK}/token")
     if url and token:
         return url.rstrip("/"), token
+    if CRM_NS:
+        token = _remote_token()
+        return (f"http://crm-web.{CRM_NS}.svc", token) if token else ("", "")
     token = _file(f"{LOCAL}/token")
     return (LOCAL_URL, token) if token else ("", "")
 

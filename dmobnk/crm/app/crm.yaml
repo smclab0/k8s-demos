@@ -91,20 +91,3 @@ spec:
   ingress:
     - from: [{podSelector: {matchLabels: {app: crm-web}}}]
       ports: [{port: 6379}]
----
-# The host here is a placeholder: crm-web sets it (and the class, if the cluster has no default) once
-# running, because of the dmobnk.smclab.net/host annotation
-# (../../common/ingress_host.py).
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: crm-web
-  namespace: dmobnk
-  annotations:
-    dmobnk.smclab.net/host: auto
-spec:
-  rules:
-    - host: crm.node-ip.sslip.io
-      http:
-        paths:
-          - {path: /, pathType: Prefix, backend: {service: {name: crm-web, port: {number: 80}}}}

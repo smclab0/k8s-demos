@@ -109,11 +109,11 @@ The online bank's signed-in customer is the country's first demo customer (Priya
 ## Layout
 
 - `base/`: the online bank's manifests and `web.py`. The web pods mount `locale-uk`.
-- `admin/`: Kube Power. `admin/base/` is the Deployment, Service, Ingress and code; `admin/<app>/` are Components that set what it controls.
+- `admin/`: Kube Power. `admin/base/` is the Deployment, Service and code; `admin/<app>/` are Components that set what it controls.
 - `crm/`: the CRM (`crm/app/`). `base/`, `branch/base/` and `crm/app/` hold just their app: the shared `locales/` and `common/` are added once per cluster by `targets/`, `kustomization.yaml`, `branch/` and `crm/base/`.
 - `targets/<combo>/<cc>`: what each combination of labels and country gets, used by Fleet and `deploy.sh`. Written by `targets/generate.py`, with `fleet.yaml`'s target list, `admin/<app>/` and `locales/country/<cc>/`: edit the script and rerun it rather than editing its output.
 - `common/`: Python modules the apps share: `ingress_host.py` (points an Ingress at the cluster), `redis_lite.py` (a tiny Redis client) and `crm_feed.py` (sends events to a linked CRM).
-- `sites/dev-smclab/`: lenny-new's `dev.smclab.net` Ingress, as a component plus one overlay per country (used by `deploy.sh`).
+- `sites/dev-smclab/`: lenny-new's fixed `dev.smclab.net` Ingresses (bank and Kube Power), as a component plus one overlay per country (used by `deploy.sh`).
 - `locales/`: the four `locale-<country>` ConfigMaps, used by both apps (bank text under `t`, branch text under `b`).
 - `branch/`: the branch kiosk (`branch/base/`).
 - `kustomization.yaml`: the default, UK online bank (a cluster with no labels).
@@ -143,7 +143,9 @@ Only the value `true` counts: `branch=false` (or any other value) is the same as
 
 Fleet matches the labels against `fleet.yaml` (`targetCustomizations`, first match wins, most specific first) and deploys that combination's overlay in `targets/`. Change a label and Fleet redeploys on its own: adding `branch=true` adds the kiosk (and, without `bank=true`, takes the online bank away). `fleet.yaml` also sets `defaultNamespace: dmobnk`, so Fleet creates the namespace.
 
-A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, for the rates autoscaler, metrics-server. Each app points its own Ingress at the cluster they land on (`common/ingress_host.py`), using its default IngressClass and an sslip.io host built from the cluster's external address, the same way for all of them (see *Where it's served* above):
+The Ingresses and, where Kube Power runs, the replica counts aren't in the Fleet bundle: the apps and Kube Power change them at runtime, and Fleet's server-side apply refuses to upgrade over fields another writer owns. Kube Power keeps each deployment at the count last set in it, or at the starting count in its `dmobnk.smclab.net/replicas` annotation.
+
+A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, for the rates autoscaler, metrics-server. Each app creates (owned by its Deployment) and points its own Ingress at the cluster it lands on (`common/ingress_host.py`), using its default IngressClass and an sslip.io host built from the cluster's external address, the same way for all of them (see *Where it's served* above):
 
 | App | URL on a Fleet cluster |
 |---|---|

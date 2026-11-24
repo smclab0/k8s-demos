@@ -49,3 +49,11 @@ rules:
     resources: ["ingresses"]
     resourceNames: ["dmobnk"]
     verbs: ["get"]
+  # It creates that Ingress itself, owned by its Deployment.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["kube-power"]
+    verbs: ["get"]

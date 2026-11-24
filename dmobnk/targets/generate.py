@@ -92,6 +92,36 @@ patches:
 """)
 
 
+def initial_replicas():
+    """{deployment: replicas} as the apps' manifests set them."""
+    import yaml
+    out = {}
+    for f in ["base/web.yaml", "base/services.yaml", "branch/base/branch.yaml", "crm/app/crm.yaml"]:
+        for d in yaml.safe_load_all(open(os.path.join(ROOT, f))):
+            if d and d.get("kind") == "Deployment" and "replicas" in d.get("spec", {}):
+                out[d["metadata"]["name"]] = d["spec"]["replicas"]
+    return out
+
+
+def replicas_patches(deploys):
+    """Where Kube Power can scale, Fleet mustn't own the replica count: with
+    both writing it, Fleet's server-side apply refuses every upgrade. So the
+    count moves to an annotation, which Kube Power applies (control.py)."""
+    reps = initial_replicas()
+    out = ""
+    for d in deploys:
+        if d in reps:
+            out += f"""  - target: {{kind: Deployment, name: {d}}}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {{dmobnk.smclab.net/replicas: "{reps[d]}"}}
+"""
+    return out
+
+
 def admin_variant(apps):
     app = "-".join(apps)
     a = admin_settings(apps)
@@ -149,6 +179,14 @@ rules:
     resources: ["ingresses"]
     resourceNames: ["{a["follow"]}"]
     verbs: ["get"]
+  # It creates that Ingress itself, owned by its Deployment.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["kube-power"]
+    verbs: ["get"]
 """
     env = [("ADMIN_BASE", a["base"]), ("APP_URL", a["url"]), ("APP_NAME", a["name"]), ("HOST_PREFIX", a["prefix"]),
            ("ADMIN_APPS", ",".join(a["apps"])), ("ADMIN_HPA", a["hpa"]), ("ADMIN_SURGE", a["surge"]), ("ADMIN_CRON", a["cron"]), ("FOLLOW_INGRESS", a["follow"])]
@@ -187,12 +225,7 @@ patches:
                     valueFrom: {{configMapKeyRef: {{name: {a["site"]}, key: host, optional: true}}}}
                   - name: INGRESS_CLASS
                     valueFrom: {{configMapKeyRef: {{name: {a["site"]}, key: ingressClass, optional: true}}}}
-  - target: {{kind: Ingress, name: kube-power}}
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/http/paths/0/path
-        value: {a["base"]}
-{link}"""
+{link}{replicas_patches(a["apps"])}"""
     write(f"admin/{app}/role.yaml", role)
     write(f"admin/{app}/kustomization.yaml", kust)
 

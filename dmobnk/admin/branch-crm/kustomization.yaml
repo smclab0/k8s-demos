@@ -32,8 +32,17 @@ patches:
                     valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: host, optional: true}}
                   - name: INGRESS_CLASS
                     valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: ingressClass, optional: true}}
-  - target: {kind: Ingress, name: kube-power}
+  - target: {kind: Deployment, name: branch-web}
     patch: |-
-      - op: replace
-        path: /spec/rules/0/http/paths/0/path
-        value: /admin
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: crm-web}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}

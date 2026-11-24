@@ -1,0 +1,79 @@
+# The online shop (shop.py). Optional settings in the dmoshp-shop ConfigMap:
+#   host          the Ingress host (default: shop.<external address>.sslip.io)
+#   ingressClass  the IngressClass (default: the cluster's default class)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-web
+  namespace: dmoshp
+  labels: {app: shop-web, dmoshp.smclab.net/tier: web}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: shop-web}}
+  template:
+    metadata:
+      labels: {app: shop-web, dmoshp.smclab.net/tier: web}
+    spec:
+      serviceAccountName: shop-web
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: shop-web}}}
+      containers:
+        - name: web
+          image: python:3.12-alpine
+          command: ["python3", "-u", "/app/shop.py"]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: NODE_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            # DMOBNK on this cluster: card payments and the CRM (../common/store.py).
+            - {name: CRM_NAMESPACE, value: dmobnk}
+            - name: SHOP_HOST
+              valueFrom: {configMapKeyRef: {name: dmoshp-shop, key: host, optional: true}}
+            - name: INGRESS_CLASS
+              valueFrom: {configMapKeyRef: {name: dmoshp-shop, key: ingressClass, optional: true}}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          resources: {requests: {cpu: 20m, memory: 48Mi}, limits: {memory: 128Mi}}
+          volumeMounts:
+            - {name: script, mountPath: /app, readOnly: true}
+            - {name: lib, mountPath: /opt/dmobnk, readOnly: true}
+            - {name: crm-link, mountPath: /etc/dmobnk-crm, readOnly: true}
+      volumes:
+        - {name: script, configMap: {name: dmoshp-shop-script}}
+        - {name: lib, configMap: {name: dmoshp-lib}}
+        # A CRM on another cluster: a dmobnk-crm-link Secret here (url, token).
+        - {name: crm-link, secret: {secretName: dmobnk-crm-link, optional: true}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: shop-web, namespace: dmoshp}
+spec: {selector: {app: shop-web}, ports: [{port: 80, targetPort: 8080}]}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: shop-web, namespace: dmoshp}
+---
+# It creates and points its own Ingress (../common/ingress_host.py).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: shop-web, namespace: dmoshp}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["shop-web"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["shop-web"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: shop-web, namespace: dmoshp}
+subjects:
+  - {kind: ServiceAccount, name: shop-web, namespace: dmoshp}
+roleRef: {kind: Role, name: shop-web, apiGroup: rbac.authorization.k8s.io}

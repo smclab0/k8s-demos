@@ -201,7 +201,7 @@ def page(name, title, body, extra_js=""):
   <nav class="links" aria-label="DMOBNK">{nav}</nav>
 </div></header>
 <main class="wrap">{body}</main>
-<footer><div class="wrap"><span>{e(T['footer'])}</span>{ADMIN_LINK}</div></footer>
+<footer><div class="wrap"><span>{e(T['footer'])}</span><span>Created By Steve McBride{(' · ' + ADMIN_LINK) if ADMIN_LINK else ''}</span></div></footer>
 <script id="cfg" type="application/json">{cfg_json}</script>
 <script>{COMMON_JS}</script>
 <script>{extra_js}</script>
@@ -554,5 +554,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 crm_feed.SOURCE.update(app="bank", where="Online banking")
-ingress_host.start("dmobnk", "dmobnk", os.environ.get("SITE_HOST", ""), os.environ.get("INGRESS_CLASS", ""))
+ingress_host.start("dmobnk", "dmobnk", os.environ.get("SITE_HOST", ""), os.environ.get("INGRESS_CLASS", ""),
+                   path="/", service="web", owner="web")
 ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

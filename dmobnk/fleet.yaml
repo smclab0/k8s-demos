@@ -277,36 +277,48 @@ targetCustomizations:
   # END generated
 
 # Fields the apps change on purpose at runtime -- don't report them as drift.
+# (The apps' Ingresses aren't in the bundle at all: each app creates and
+# looks after its own, see common/ingress_host.py.)
 diff:
   comparePatches:
-    # The web pods point their Ingress at the cluster they run on
-    # (common/ingress_host.py).
-    - apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      name: dmobnk
+    # Where Kube Power runs, it owns the replica counts (admin/base/control.py).
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: web
       namespace: dmobnk
-      jsonPointers:
-        - /spec/rules/0/host
-        - /spec/ingressClassName
-    - apiVersion: networking.k8s.io/v1
-      kind: Ingress
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: accounts-svc
+      namespace: dmobnk
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cards-svc
+      namespace: dmobnk
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: loans-svc
+      namespace: dmobnk
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: mortgage-svc
+      namespace: dmobnk
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: crossborder-svc
+      namespace: dmobnk
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
       name: branch-web
       namespace: dmobnk
-      jsonPointers:
-        - /spec/rules/0/host
-        - /spec/ingressClassName
-    # Kube Power does the same for its own Ingress (admin/base/kube_power.py).
-    - apiVersion: networking.k8s.io/v1
-      kind: Ingress
-      name: kube-power
-      namespace: dmobnk
-      jsonPointers:
-        - /spec/rules/0/host
-        - /spec/ingressClassName
-    - apiVersion: networking.k8s.io/v1
-      kind: Ingress
+      jsonPointers: [/spec/replicas]
+    - apiVersion: apps/v1
+      kind: Deployment
       name: crm-web
       namespace: dmobnk
-      jsonPointers:
-        - /spec/rules/0/host
-        - /spec/ingressClassName
+      jsonPointers: [/spec/replicas]

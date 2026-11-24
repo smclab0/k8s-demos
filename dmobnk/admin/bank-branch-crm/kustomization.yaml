@@ -32,14 +32,65 @@ patches:
                     valueFrom: {configMapKeyRef: {name: dmobnk-site, key: host, optional: true}}
                   - name: INGRESS_CLASS
                     valueFrom: {configMapKeyRef: {name: dmobnk-site, key: ingressClass, optional: true}}
-  - target: {kind: Ingress, name: kube-power}
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/http/paths/0/path
-        value: /dmobnk/admin
   # Show the "Admin" link in the bank's footer.
   - target: {kind: Deployment, name: web}
     patch: |-
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: {name: KUBE_POWER_URL, value: /dmobnk/admin}
+  - target: {kind: Deployment, name: web}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: accounts-svc}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "3"}
+  - target: {kind: Deployment, name: cards-svc}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "3"}
+  - target: {kind: Deployment, name: loans-svc}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: mortgage-svc}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: crossborder-svc}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: branch-web}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}
+  - target: {kind: Deployment, name: crm-web}
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+      - op: add
+        path: /metadata/annotations
+        value: {dmobnk.smclab.net/replicas: "2"}

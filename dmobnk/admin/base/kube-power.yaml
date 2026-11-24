@@ -41,21 +41,6 @@ kind: Service
 metadata: {name: kube-power, namespace: dmobnk}
 spec: {selector: {app: kube-power}, ports: [{port: 80, targetPort: 8080}]}
 ---
-# Same host as the app's Ingress; the path comes from ../bank or ../branch.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: kube-power
-  namespace: dmobnk
-  annotations:
-    dmobnk.smclab.net/host: auto
-spec:
-  rules:
-    - host: admin.node-ip.sslip.io
-      http:
-        paths:
-          - {path: /admin, pathType: Prefix, backend: {service: {name: kube-power, port: {number: 80}}}}
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:

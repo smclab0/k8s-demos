@@ -1,0 +1,15 @@
+# Python modules the shop and self-checkout share, mounted at /opt/dmobnk:
+#   store.py         catalogue, stock, orders, card payments, page chrome
+#   ingress_host.py  points an app's Ingress at the cluster it runs on   } copies of
+#   redis_lite.py    a tiny Redis client                                  } ../dmobnk/common
+#   crm_feed.py      sends purchases to DMOBNK's CRM                      } (../sync-shared.sh)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: dmoshp-lib
+    namespace: dmoshp
+    files:
+      - store.py
+      - ingress_host.py
+      - redis_lite.py
+      - crm_feed.py

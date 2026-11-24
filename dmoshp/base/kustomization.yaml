@@ -1,0 +1,12 @@
+# What both apps need: the shared modules, the store's Redis and their
+# cluster-wide read permissions. ../shop and ../sok are the apps.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../common
+  - redis.yaml
+  - crm-token.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: dmoshp
+    includeSelectors: false

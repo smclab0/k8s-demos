@@ -1,0 +1,50 @@
+# Purchases with a DMOBNK card go to DMOBNK's CRM when it runs on the same
+# cluster (../common/crm_feed.py, CRM_NAMESPACE=dmobnk). The apps read its
+# ingest token from the dmobnk-crm Secret through the API: a Secret in
+# another namespace can't be mounted. This allows reading that one Secret
+# by name; nothing else. (Bound cluster-wide because the dmobnk namespace
+# may not exist when this is applied.)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dmoshp-crm-token
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["dmobnk-crm"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dmoshp-crm-token
+subjects:
+  - {kind: ServiceAccount, name: shop-web, namespace: dmoshp}
+  - {kind: ServiceAccount, name: sok-web, namespace: dmoshp}
+roleRef: {kind: ClusterRole, name: dmoshp-crm-token, apiGroup: rbac.authorization.k8s.io}
+---
+# Read only, cluster-wide: what ../common/ingress_host.py needs to find the
+# cluster's external address (nodes, LoadBalancer Services, IngressClasses).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dmoshp-web
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dmoshp-web
+subjects:
+  - {kind: ServiceAccount, name: shop-web, namespace: dmoshp}
+  - {kind: ServiceAccount, name: sok-web, namespace: dmoshp}
+roleRef: {kind: ClusterRole, name: dmoshp-web, apiGroup: rbac.authorization.k8s.io}
