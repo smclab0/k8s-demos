@@ -36,8 +36,12 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
-  # Its own Ingress (ingress_host.py).
+  # Its own Ingress (ingress_host.py), which copies its app's host.
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     resourceNames: ["kube-power"]
     verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["branch-web"]
+    verbs: ["get"]

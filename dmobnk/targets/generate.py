@@ -26,18 +26,18 @@ LABEL_CC = "dmobnk.smclab.net/country"
 # app set -> (resources, Kube Power settings)
 APPS = {
     "bank": {"res": ["base"], "admin": {
-        "base": "/dmobnk/admin", "url": "/dmobnk/", "name": "the bank", "prefix": "dmobnk", "site": "dmobnk-site",
+        "base": "/dmobnk/admin", "url": "/dmobnk/", "name": "the bank", "prefix": "dmobnk", "site": "dmobnk-site", "follow": "dmobnk",
         "apps": ["web", "accounts-svc", "cards-svc", "loans-svc", "mortgage-svc", "rates-svc", "crossborder-svc"],
         "hpa": "rates-svc", "surge": "rates-svc", "cron": "rates-refresh"}},
     "branch": {"res": ["branch/base"], "admin": {
-        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch",
+        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch", "follow": "branch-web",
         "apps": ["branch-web"], "hpa": "", "surge": "", "cron": ""}},
     "crm": {"res": ["crm/base"], "admin": {
-        "base": "/admin", "url": "/", "name": "the CRM", "prefix": "crm", "site": "dmobnk-crm-site",
+        "base": "/admin", "url": "/", "name": "the CRM", "prefix": "crm", "site": "dmobnk-crm-site", "follow": "crm-web",
         "apps": ["crm-web"], "hpa": "", "surge": "", "cron": ""}},
     # Side by side: the shared locales and modules come in once, with the kiosk.
     "branch-crm": {"res": ["branch/base", "crm/app"], "admin": {
-        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch",
+        "base": "/admin", "url": "/", "name": "the kiosk", "prefix": "branch", "site": "dmobnk-branch", "follow": "branch-web",
         "apps": ["branch-web", "crm-web"], "hpa": "", "surge": "", "cron": ""}},
 }
 # combo name -> (labels, app set, admin); most specific first, since Fleet
@@ -114,7 +114,7 @@ rules:
     resources: ["jobs"]
     verbs: ["list", "create"]
 """
-    role += """  # Its sign-in password: read it, or create it on first start.
+    role += f"""  # Its sign-in password: read it, or create it on first start.
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["dmobnk-admin"]
@@ -122,14 +122,18 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
-  # Its own Ingress (ingress_host.py).
+  # Its own Ingress (ingress_host.py), which copies its app's host.
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     resourceNames: ["kube-power"]
     verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["{a["follow"]}"]
+    verbs: ["get"]
 """
     env = [("ADMIN_BASE", a["base"]), ("APP_URL", a["url"]), ("APP_NAME", a["name"]), ("HOST_PREFIX", a["prefix"]),
-           ("ADMIN_APPS", ",".join(a["apps"])), ("ADMIN_HPA", a["hpa"]), ("ADMIN_SURGE", a["surge"]), ("ADMIN_CRON", a["cron"])]
+           ("ADMIN_APPS", ",".join(a["apps"])), ("ADMIN_HPA", a["hpa"]), ("ADMIN_SURGE", a["surge"]), ("ADMIN_CRON", a["cron"]), ("FOLLOW_INGRESS", a["follow"])]
     env_yaml = "\n".join(f'                  - {{name: {k}, value: "{v}"}}' for k, v in env)
     link = ""
     if app == "bank":

@@ -9,8 +9,8 @@ Kubernetes fixing them: scale a deployment, kill a pod, do a rolling restart
 and, on the bank, send a traffic surge at rates-svc.
 
 Sign-in uses the `password` key of the `dmobnk-admin` Secret. If there's
-no such Secret, the first start creates one with a random password (read it
-with kubectl, see the README). Everything it touches is limited to the
+no such Secret, the first start creates one with the demo password
+(DEMO_PASSWORD); change the Secret to use another. Everything it touches is limited to the
 dmobnk namespace by the kube-power Role and to ADMIN_APPS below."""
 import base64
 import hashlib
@@ -34,6 +34,9 @@ ENABLED = os.path.exists(f"{SA}/token")
 PASSWORD = ""                    # set by init() from the dmobnk-admin Secret
 _KEY = b""
 SECRET = "dmobnk-admin"
+# The demo password every new dmobnk-admin Secret starts with (the user's
+# choice: one known password for all of DMOBNK's demo sign-ins).
+DEMO_PASSWORD = "dmopwd1"
 POD = os.environ.get("POD_NAME", "")
 NODE = os.environ.get("NODE_NAME", "").split(".")[0]
 COOKIE = "dmobnk_admin"
@@ -98,7 +101,7 @@ def init():
             except K8sError as err:
                 if err.code != 404:
                     raise
-                pw = "".join(secrets.choice("abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(20))
+                pw = DEMO_PASSWORD
                 try:
                     k8s("POST", f"/api/v1/namespaces/{NS}/secrets", {
                         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",

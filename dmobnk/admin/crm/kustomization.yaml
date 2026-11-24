@@ -27,6 +27,7 @@ patches:
                   - {name: ADMIN_HPA, value: ""}
                   - {name: ADMIN_SURGE, value: ""}
                   - {name: ADMIN_CRON, value: ""}
+                  - {name: FOLLOW_INGRESS, value: "crm-web"}
                   - name: SITE_HOST
                     valueFrom: {configMapKeyRef: {name: dmobnk-crm-site, key: host, optional: true}}
                   - name: INGRESS_CLASS

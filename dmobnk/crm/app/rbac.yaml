@@ -46,7 +46,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get"]
+    verbs: ["get", "list"]
   # The ingress controller's LoadBalancer Service, for its EXTERNAL-IP.
   - apiGroups: [""]
     resources: ["services"]

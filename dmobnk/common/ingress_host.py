@@ -9,7 +9,7 @@ annotation dmobnk.smclab.net/host: auto, sets
   - its IngressClass, when the cluster has no default class.
 An Ingress without the annotation (e.g. dev.smclab.net on lenny-new) is left
 alone. The ServiceAccount needs: get/patch on that Ingress, get on nodes,
-list on services and ingressclasses."""
+get and list on nodes, list on services and ingressclasses."""
 import ipaddress
 import json
 import os
@@ -134,7 +134,8 @@ def published_addresses(ingress):
 def cluster_address(ingress):
     """(IPv4, where it came from) for the sslip.io host. The first PUBLIC
     address of: the cluster's external ingress address (published_addresses),
-    the node's ExternalIP, the EC2 instance's public IP (metadata, then on EC2
+    the ExternalIP of the first Ready worker node by name (the same for every
+    replica), the EC2 instance's public IP (metadata, then on EC2
     its egress IP). With none public (on-prem): the ingress address, else the
     node's ExternalIP, else its InternalIP."""
     private = []
@@ -153,17 +154,21 @@ def cluster_address(ingress):
         hit = consider(addr, source)
         if hit:
             return hit
-    name = os.environ.get("NODE_NAME", "")
-    node = {}
+    # Every replica must pick the SAME node, or they keep overwriting each
+    # other's host: so not "my node" but the first Ready worker by name.
+    pool = []
     try:
-        node = k8s("GET", f"/api/v1/nodes/{name}")
-        for a in node["status"].get("addresses", []):
+        pool = node_pool()
+    except Exception as err:
+        print(f"couldn't list nodes: {err}", flush=True)
+    for n in pool:
+        for a in n["status"].get("addresses", []):
             if a.get("type") == "ExternalIP":
-                hit = consider(a.get("address"), "node ExternalIP")
+                hit = consider(a.get("address"), f"node ExternalIP of {n['metadata']['name']}")
                 if hit:
                     return hit
-    except Exception as err:
-        print(f"couldn't read node {name}: {err}", flush=True)
+    name = os.environ.get("NODE_NAME", "")
+    node = next((n for n in pool if n["metadata"]["name"] == name), {})
     hit = consider(ec2_public_ip(), "EC2 instance metadata")
     if hit:
         return hit
@@ -174,8 +179,29 @@ def cluster_address(ingress):
         print("on EC2 but found no public address: set a fixed host (see the README)", flush=True)
     if private:
         return private[0]
+    for n in pool:
+        for a in n["status"].get("addresses", []):
+            if a.get("type") == "InternalIP" and a.get("address"):
+                return a["address"], f"node InternalIP of {n['metadata']['name']}"
     ip = os.environ.get("NODE_IP", "").strip()
     return (ip, "node InternalIP") if ip else (None, None)
+
+
+# Where an address came from that only this pod's node can see: another
+# replica on another node would find a different one.
+PER_NODE = ("EC2 instance metadata", "EC2 egress IP")
+
+
+def node_pool():
+    """Ready, schedulable nodes, workers first (if any), sorted by name."""
+    ready = []
+    for n in k8s("GET", "/api/v1/nodes")["items"]:
+        conds = {c["type"]: c["status"] for c in n.get("status", {}).get("conditions", [])}
+        if conds.get("Ready") == "True" and not n.get("spec", {}).get("unschedulable"):
+            ready.append(n)
+    labels = ("node-role.kubernetes.io/control-plane", "node-role.kubernetes.io/master")
+    workers = [n for n in ready if not any(k in n["metadata"].get("labels", {}) for k in labels)]
+    return sorted(workers or ready, key=lambda n: n["metadata"]["name"])
 
 
 def ingress_class(current):
@@ -201,8 +227,8 @@ def ingress_class(current):
     return current
 
 
-def _loop(ingress, prefix, fixed_host, fixed_class):
-    address, checked, ttl = None, 0.0, 0
+def _loop(ingress, prefix, fixed_host, fixed_class, follow):
+    address, checked, ttl, source = None, 0.0, 0, None
     while True:
         try:
             ing = k8s("GET", ingress)
@@ -210,7 +236,13 @@ def _loop(ingress, prefix, fixed_host, fixed_class):
                 time.sleep(30)
                 continue
             host = fixed_host
-            if not host:
+            if follow:
+                # Share another Ingress's host and class (Kube Power sits on its app's host).
+                other = k8s("GET", f"/apis/networking.k8s.io/v1/namespaces/{NS}/ingresses/{follow}")
+                h = other["spec"]["rules"][0].get("host", "")
+                host = h if h and "node-ip.sslip.io" not in h else None
+                fixed_class = other["spec"].get("ingressClassName") or fixed_class
+            elif not host:
                 # Re-resolved every 5 minutes once it's a public or published
                 # address; every 30 s while it's only a node's private address,
                 # since a cloud load balancer can take a minute or two to get
@@ -220,8 +252,13 @@ def _loop(ingress, prefix, fixed_host, fixed_class):
                     if found and found != address:
                         print(f"using {source} {found}", flush=True)
                     address, checked = found or address, time.time()
-                    ttl = 30 if not found or source in ("node InternalIP", "node ExternalIP") else 300
+                    ttl = 30 if not found or (source or "").startswith("node ") else 300
                 host = f"{prefix}.{address}.sslip.io" if address else None
+                current = ing["spec"]["rules"][0].get("host", "")
+                if (source or "").startswith(PER_NODE) and current.startswith(prefix + ".") and "node-ip.sslip.io" not in current:
+                    # Only this node knows that address, so another replica may
+                    # have set a different, equally good one: keep it.
+                    host = current
             spec = ing["spec"]
             ops = []
             if host and spec["rules"][0].get("host") != host:
@@ -237,10 +274,10 @@ def _loop(ingress, prefix, fixed_host, fixed_class):
         time.sleep(10)
 
 
-def start(name, prefix, fixed_host="", fixed_class=""):
+def start(name, prefix, fixed_host="", fixed_class="", follow=""):
     """Keep Ingress `name` (in this pod's namespace) pointed at this cluster."""
     if not os.path.exists(f"{SA}/token"):
         return
     ingress = f"/apis/networking.k8s.io/v1/namespaces/{NS}/ingresses/{name}"
-    threading.Thread(target=_loop, args=(ingress, prefix, fixed_host.strip(), fixed_class.strip()),
+    threading.Thread(target=_loop, args=(ingress, prefix, fixed_host.strip(), fixed_class.strip(), follow.strip()),
                      daemon=True).start()

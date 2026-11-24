@@ -32,7 +32,7 @@ On the bank it controls the bank's services; on a kiosk `branch-web`, on a CRM `
 
 It runs as its own small `kube-power` Deployment (`admin/base/kube_power.py` serving `control.py`), with its own Ingress on the app's host. Its `kube-power` Role (`admin/<app>/role.yaml`) only covers the `dmobnk` namespace and can only change those deployments, so the public web pods hold no such permissions.
 
-**The password** is the `password` key of the `dmobnk-admin` Secret, never kept in git. If the Secret doesn't exist, Kube Power creates it with a random password on its first start. Read it with:
+**The password** is `dmopwd1`, the same for all of DMOBNK's demo sign-ins. It's the `password` key of the `dmobnk-admin` Secret, which Kube Power creates with that password on its first start if it doesn't exist. Read it with:
 
 ```sh
 kubectl -n dmobnk get secret dmobnk-admin -o jsonpath='{.data.password}' | base64 -d
@@ -88,7 +88,7 @@ A cluster labelled `crm=true` gets the **CRM**, the bank staff's customer and sa
 
 The 40 example customers (including the kiosk's three demo customers, with the same accounts), staff, pipeline and history are made up per country; the screens are in English. Everything lives in `crm-redis`, so a restart of it starts again from the example data.
 
-**Sign-in:** pick who you are (one of four demo staff, so notes and tasks show who did them) and enter the password from the `dmobnk-crm` Secret. The CRM creates that Secret with a random password, and the token linked apps use, on its first start:
+**Sign-in:** pick who you are (one of four demo staff, so notes and tasks show who did them) and enter the password, `dmopwd1`. It's in the `dmobnk-crm` Secret, which the CRM creates on its first start with that password and a random token for linked apps:
 
 ```sh
 kubectl -n dmobnk get secret dmobnk-crm -o jsonpath='{.data.password}' | base64 -d
@@ -150,6 +150,8 @@ A Fleet cluster only needs an ingress controller (any: traefik, nginx…) and, f
 | Online bank | `http://dmobnk.<external address>.sslip.io/dmobnk/` (with `admin=true`, Kube Power at `…/dmobnk/admin`) |
 | Branch kiosk | `http://branch.<external address>.sslip.io/` (with `admin=true`, Kube Power at `…/admin`) |
 | CRM | `http://crm.<external address>.sslip.io/` (with `admin=true` and no kiosk, Kube Power at `…/admin`) |
+
+Without a load balancer address, the address is the ExternalIP of the first Ready worker node by name, so every replica (and Kube Power, which copies its app's host) agrees on one; it moves on if that node goes away.
 
 To fix the online bank's host or class instead, create a `dmobnk-site` ConfigMap (keys `host`, `ingressClass`) and restart `deploy/web`. To see what was picked: `kubectl -n dmobnk logs deploy/web | grep -E 'using|ingress'`.
 

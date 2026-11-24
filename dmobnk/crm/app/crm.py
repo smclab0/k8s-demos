@@ -1,8 +1,8 @@
 """DMOBNK CRM: the bank staff's customer and sales app, deployed by Fleet to
 clusters labelled crm=true.
 
-Staff sign in with the password in the `dmobnk-crm` Secret (created with a
-random password on first start, see init) and say who they are. They can:
+Staff sign in with the password in the `dmobnk-crm` Secret (created with
+the demo password, dmopwd1, on first start, see init) and say who they are. They can:
   - search customers and open a 360 view: details, accounts, cards and
     loans, recent transactions, opportunities, tasks and a timeline;
   - log notes, calls, visits and emails against a customer;
@@ -44,6 +44,9 @@ COUNTRY = L["country"]
 r = Redis(os.environ.get("REDIS_HOST", "crm-redis"))
 
 SECRET = "dmobnk-crm"
+# The demo password a new dmobnk-crm Secret starts with (the same for all of
+# DMOBNK's demo sign-ins). The ingest token stays random.
+DEMO_PASSWORD = "dmopwd1"
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 NS = os.environ.get("POD_NAMESPACE", "dmobnk")
 COOKIE = "dmobnk_crm"
@@ -352,7 +355,6 @@ def init():
         _KEY = hashlib.sha256(b"dmobnk-crm:" + PASSWORD.encode()).digest()
         return
     import base64
-    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     while True:
         try:
             try:
@@ -364,9 +366,9 @@ def init():
                     ingress_host.k8s("POST", f"/api/v1/namespaces/{NS}/secrets", {
                         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
                         "metadata": {"name": SECRET, "labels": {"app.kubernetes.io/part-of": "dmobnk"}},
-                        "stringData": {"password": "".join(secrets.choice(alphabet) for _ in range(20)),
+                        "stringData": {"password": DEMO_PASSWORD,
                                        "token": secrets.token_urlsafe(24)}})
-                    print(f"created the {SECRET} Secret with a new password and ingest token", flush=True)
+                    print(f"created the {SECRET} Secret with the demo password and a new ingest token", flush=True)
                 except urllib.error.HTTPError as err2:
                     if err2.code != 409:      # 409: another replica made it first
                         raise
@@ -640,8 +642,7 @@ def login_page(err=""):
 <label>Password<input type="password" name="password" autocomplete="current-password" required autofocus></label>
 {f'<p class="err" role="alert">{e(msg)}</p>' if msg else ''}
 <button class="btn" type="submit">Sign in</button>
-<p class="muted" style="font-size:13px;margin:0">The password is in this cluster's <span class="mono">dmobnk-crm</span> Secret:<br>
-<span class="mono" style="font-size:12px">kubectl -n dmobnk get secret dmobnk-crm -o jsonpath='{{.data.password}}' | base64 -d</span></p>"""
+<p class="muted" style="font-size:13px;margin:0">It's in this cluster's <span class="mono">dmobnk-crm</span> Secret.</p>"""
     return doc("Sign in · DMOBNK CRM", f"""<main class="login"><form class="card" method="post" action="/login">
 <div class="row">{LOGO.replace('fill="#fff"', 'fill="#0b1b3a"', 1)}<div><h1 style="font-size:24px">DMOBNK CRM</h1><span class="muted">Customers and sales, for staff</span></div></div>
 {inner}</form></main>""")

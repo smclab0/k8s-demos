@@ -27,6 +27,7 @@ patches:
                   - {name: ADMIN_HPA, value: "rates-svc"}
                   - {name: ADMIN_SURGE, value: "rates-svc"}
                   - {name: ADMIN_CRON, value: "rates-refresh"}
+                  - {name: FOLLOW_INGRESS, value: "dmobnk"}
                   - name: SITE_HOST
                     valueFrom: {configMapKeyRef: {name: dmobnk-site, key: host, optional: true}}
                   - name: INGRESS_CLASS

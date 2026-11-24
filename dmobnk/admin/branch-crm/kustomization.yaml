@@ -27,6 +27,7 @@ patches:
                   - {name: ADMIN_HPA, value: ""}
                   - {name: ADMIN_SURGE, value: ""}
                   - {name: ADMIN_CRON, value: ""}
+                  - {name: FOLLOW_INGRESS, value: "branch-web"}
                   - name: SITE_HOST
                     valueFrom: {configMapKeyRef: {name: dmobnk-branch, key: host, optional: true}}
                   - name: INGRESS_CLASS
