@@ -52,8 +52,12 @@ A cluster labelled `dmobnk.smclab.net/role=branch` gets the **branch counter** a
 It's `branch-web` (`branch/base/branch.py`, 2 replicas) plus its own `branch-redis`, which holds the queue, counters and cash. The branch's language, currency and name follow the cluster's `dmobnk.smclab.net/country` label, the same as the online bank. All customers and figures are examples.
 
 **Where it's served.** A kustomize bundle can't read a cluster label's value, so `branch-web` sets its own Ingress (plain HTTP) once it's running:
-- host: `branch.<node address>.sslip.io` (the node's ExternalIP, else its InternalIP);
+- host: `branch.<node address>.sslip.io`. The address is the first of: the node's ExternalIP (EKS and most managed clouds), the EC2 instance's public IP from instance metadata (self-managed k3s/rke2 on EC2 don't record an ExternalIP), on EC2 the instance's egress IP from `checkip.amazonaws.com`, then the node's InternalIP (right on-prem). It's checked again every 5 minutes.
 - class: the cluster's default IngressClass, else its only one, else `traefik` or `nginx`.
+
+To see what it picked: `kubectl -n dmobnk logs deploy/branch-web | grep -E 'using|ingress'`.
+
+**On AWS EC2:** the instances' security group must allow inbound TCP 80 to the node(s) running the ingress controller, since the sslip.io name points straight at the node. If the instances have no public IP (private subnet behind a NAT or load balancer), no address is right: set `host` in the `dmobnk-branch` ConfigMap to the load balancer's DNS name instead.
 
 To override either, or the branch's name, create a `dmobnk-branch` ConfigMap on that cluster, then restart `branch-web`:
 

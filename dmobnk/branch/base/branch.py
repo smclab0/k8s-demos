@@ -207,15 +207,79 @@ def k8s(method, path, body=None, ctype="application/json"):
         return json.load(resp)
 
 
-def node_address():
-    node = os.environ.get("NODE_NAME", "")
+IMDS = "http://169.254.169.254/latest"
+
+
+def ec2_public_ip():
+    """The EC2 instance's public IPv4 from instance metadata. Self-managed
+    k3s/rke2 on EC2 don't record it on the Node, so without this the host
+    would be the private VPC address. Tries IMDSv2, then IMDSv1: with the
+    instance's default hop limit of 1, IMDSv2's token reply never reaches a
+    pod, but a v1 reply does when the instance allows v1. Fails fast off EC2."""
+    headers = {}
     try:
-        for a in k8s("GET", f"/api/v1/nodes/{node}")["status"].get("addresses", []):
+        req = urllib.request.Request(f"{IMDS}/api/token", method="PUT",
+                                     headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            headers = {"X-aws-ec2-metadata-token": resp.read().decode()}
+    except Exception:
+        pass
+    try:
+        req = urllib.request.Request(f"{IMDS}/meta-data/public-ipv4", headers=headers)
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            return resp.read().decode().strip() or None
+    except Exception:
+        return None
+
+
+def on_ec2(node):
+    if (node.get("spec", {}).get("providerID") or "").startswith("aws://"):
+        return True
+    for f in ("/sys/class/dmi/id/sys_vendor", "/sys/class/dmi/id/board_vendor", "/sys/class/dmi/id/product_uuid"):
+        try:
+            with open(f) as fh:
+                v = fh.read().strip().lower()
+            if "amazon" in v or v.startswith("ec2"):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def egress_ip():
+    # AWS's own "what's my IP" service: on an EC2 instance with a public IP
+    # (and no NAT gateway) that's the instance's public IP.
+    try:
+        with urllib.request.urlopen("https://checkip.amazonaws.com/", timeout=3) as resp:
+            ip = resp.read().decode().strip()
+            return ip if ip.count(".") == 3 else None
+    except Exception:
+        return None
+
+
+def node_address():
+    """(address, where it came from): the node's ExternalIP (EKS and most
+    managed clouds), else on EC2 the instance's public IP, else the node's
+    InternalIP (right on-prem)."""
+    name = os.environ.get("NODE_NAME", "")
+    node = {}
+    try:
+        node = k8s("GET", f"/api/v1/nodes/{name}")
+        for a in node["status"].get("addresses", []):
             if a.get("type") == "ExternalIP" and a.get("address"):
-                return a["address"]
+                return a["address"], "node ExternalIP"
     except Exception as err:
-        print(f"couldn't read node {node}: {err}", flush=True)
-    return os.environ.get("NODE_IP", "").strip() or None
+        print(f"couldn't read node {name}: {err}", flush=True)
+    ip = ec2_public_ip()
+    if ip:
+        return ip, "EC2 instance metadata"
+    if on_ec2(node):
+        ip = egress_ip()
+        if ip:
+            return ip, "EC2 egress IP (checkip.amazonaws.com)"
+        print("on EC2 but found no public IP: set `host` in the dmobnk-branch ConfigMap", flush=True)
+    ip = os.environ.get("NODE_IP", "").strip()
+    return (ip, "node InternalIP") if ip else (None, None)
 
 
 def ingress_class(current):
@@ -245,12 +309,18 @@ def ingress_class(current):
 def ingress_loop():
     if not os.path.exists(f"{SA}/token"):
         return
-    address = None
+    address, checked = None, 0.0
     while True:
         try:
             host = os.environ.get("BRANCH_HOST", "").strip()
             if not host:
-                address = address or node_address()
+                # Re-resolved every 5 minutes, so a wrong first answer (or a
+                # new public IP after a stop/start) doesn't stick.
+                if not address or time.time() - checked > 300:
+                    found, source = node_address()
+                    if found and found != address:
+                        print(f"using {source} {found}", flush=True)
+                    address, checked = found or address, time.time()
                 host = f"branch.{address}.sslip.io" if address else None
             spec = k8s("GET", INGRESS)["spec"]
             ops = []
@@ -264,7 +334,7 @@ def ingress_loop():
                 print(f"ingress set to host {host}, class {cls or '(cluster default)'}", flush=True)
         except Exception as err:
             print(f"ingress update failed: {err}", flush=True)
-        time.sleep(30)
+        time.sleep(10)
 
 
 # ---------------------------------------------------------------- pages
