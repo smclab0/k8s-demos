@@ -179,19 +179,20 @@ def cluster_address(ingress):
 
 
 def ingress_class(current):
-    """The class to use: none when the cluster has a default class (leave it
-    to the default), else the current one, else its only class, else traefik
-    or nginx."""
+    """The class to use: the current one if the cluster has it, else the
+    cluster's default class, else its only class, else traefik or nginx.
+    (Never keeps a class the cluster doesn't have, e.g. nginx left over from
+    an older manifest on a traefik cluster.)"""
     try:
         items = k8s("GET", "/apis/networking.k8s.io/v1/ingressclasses")["items"]
     except Exception:
         return current
     names = [i["metadata"]["name"] for i in items]
-    if any(i["metadata"].get("annotations", {}).get("ingressclass.kubernetes.io/is-default-class") == "true"
-           for i in items):
-        return current
     if current in names:
         return current
+    for i in items:
+        if i["metadata"].get("annotations", {}).get("ingressclass.kubernetes.io/is-default-class") == "true":
+            return i["metadata"]["name"]
     if len(names) == 1:
         return names[0]
     for pick in ("traefik", "nginx"):
