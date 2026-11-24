@@ -1,6 +1,7 @@
-# branch-web points its own Ingress at its node (see ingress_loop in
-# branch.py): it may read and patch that one Ingress, read its node's
-# address and see which IngressClasses the cluster has.
+# branch-web points its own Ingress at the cluster's external address (see
+# ingress_loop in branch.py): it may read and patch that one Ingress, list
+# Services to find the ingress controller's LoadBalancer EXTERNAL-IP, read
+# its node's address and see which IngressClasses the cluster has.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -27,7 +28,7 @@ subjects:
   - {kind: ServiceAccount, name: branch-web, namespace: dmobnk}
 roleRef: {kind: Role, name: branch-web-ingress, apiGroup: rbac.authorization.k8s.io}
 ---
-# Nodes and IngressClasses are cluster-scoped, so these need a ClusterRole.
+# Nodes, IngressClasses and Services in other namespaces need a ClusterRole.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -36,6 +37,10 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get"]
+  # The ingress controller's LoadBalancer Service, for its EXTERNAL-IP.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingressclasses"]
     verbs: ["list"]

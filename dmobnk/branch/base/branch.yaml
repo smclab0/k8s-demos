@@ -3,7 +3,7 @@
 #
 # Optional per-cluster settings live in a `dmobnk-branch` ConfigMap that
 # isn't in git (create it with kubectl, then restart branch-web):
-#   host          the Ingress host (default: branch.<node address>.sslip.io)
+#   host          the Ingress host (default: branch.<external address>.sslip.io)
 #   ingressClass  the IngressClass (default: the cluster's default class)
 #   name          the branch name shown on screen (default: from the locale)
 apiVersion: apps/v1

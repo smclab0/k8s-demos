@@ -8,9 +8,10 @@ in branch-redis, so any replica can serve any screen.
 
 The text, currency and number formats come from the mounted locale ConfigMap
 (the "b" section). The app also points its own Ingress at
-branch.<node address>.sslip.io, or at the host set in the optional
+branch.<cluster external address>.sslip.io, or at the host set in the optional
 dmobnk-branch ConfigMap (see branch.yaml)."""
 import html
+import ipaddress
 import json
 import os
 import socket
@@ -257,27 +258,96 @@ def egress_ip():
         return None
 
 
-def node_address():
-    """(address, where it came from): the node's ExternalIP (EKS and most
-    managed clouds), else on EC2 the instance's public IP, else the node's
-    InternalIP (right on-prem)."""
+def to_ipv4(addr):
+    """An IPv4 address for addr, resolving a hostname (an AWS load balancer
+    publishes a DNS name, not an IP). None if it doesn't resolve."""
+    try:
+        return str(ipaddress.IPv4Address(addr))
+    except ValueError:
+        pass
+    try:
+        return socket.getaddrinfo(addr, 80, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+    except (OSError, IndexError):
+        return None
+
+
+def is_public(ip):
+    try:
+        return ipaddress.ip_address(ip).is_global
+    except ValueError:
+        return False
+
+
+def published_addresses():
+    """The cluster's external ingress address(es), as [(address, source)]:
+    what the ingress controller wrote into this Ingress's status, then the
+    EXTERNAL-IP of any LoadBalancer Service serving port 80 or 443 (the
+    ingress controller's, e.g. traefik on k3s or ingress-nginx behind an AWS
+    load balancer)."""
+    out = []
+    try:
+        for lb in k8s("GET", INGRESS).get("status", {}).get("loadBalancer", {}).get("ingress") or []:
+            if lb.get("ip") or lb.get("hostname"):
+                out.append((lb.get("ip") or lb["hostname"], "Ingress status"))
+    except Exception as err:
+        print(f"couldn't read the Ingress status: {err}", flush=True)
+    try:
+        for svc in k8s("GET", "/api/v1/services")["items"]:
+            spec = svc.get("spec", {})
+            if spec.get("type") != "LoadBalancer" or not {p.get("port") for p in spec.get("ports", [])} & {80, 443}:
+                continue
+            name = f"{svc['metadata']['namespace']}/{svc['metadata']['name']}"
+            for lb in svc.get("status", {}).get("loadBalancer", {}).get("ingress") or []:
+                if lb.get("ip") or lb.get("hostname"):
+                    out.append((lb.get("ip") or lb["hostname"], f"LoadBalancer {name}"))
+    except Exception as err:
+        print(f"couldn't list LoadBalancer Services: {err}", flush=True)
+    return out
+
+
+def cluster_address():
+    """(IPv4, where it came from) for the sslip.io host. The first PUBLIC
+    address of: the cluster's external ingress address (published_addresses),
+    the node's ExternalIP, the EC2 instance's public IP (metadata, then on EC2
+    its egress IP). With none public (on-prem): the ingress address, else the
+    node's ExternalIP, else its InternalIP."""
+    private = []
+
+    def consider(addr, source):
+        ip = to_ipv4(addr) if addr else None
+        if not ip:
+            return None
+        src = source if ip == addr else f"{source} ({addr})"
+        if is_public(ip):
+            return ip, src
+        private.append((ip, src))
+        return None
+
+    for addr, source in published_addresses():
+        hit = consider(addr, source)
+        if hit:
+            return hit
     name = os.environ.get("NODE_NAME", "")
     node = {}
     try:
         node = k8s("GET", f"/api/v1/nodes/{name}")
         for a in node["status"].get("addresses", []):
-            if a.get("type") == "ExternalIP" and a.get("address"):
-                return a["address"], "node ExternalIP"
+            if a.get("type") == "ExternalIP":
+                hit = consider(a.get("address"), "node ExternalIP")
+                if hit:
+                    return hit
     except Exception as err:
         print(f"couldn't read node {name}: {err}", flush=True)
-    ip = ec2_public_ip()
-    if ip:
-        return ip, "EC2 instance metadata"
+    hit = consider(ec2_public_ip(), "EC2 instance metadata")
+    if hit:
+        return hit
     if on_ec2(node):
-        ip = egress_ip()
-        if ip:
-            return ip, "EC2 egress IP (checkip.amazonaws.com)"
-        print("on EC2 but found no public IP: set `host` in the dmobnk-branch ConfigMap", flush=True)
+        hit = consider(egress_ip(), "EC2 egress IP (checkip.amazonaws.com)")
+        if hit:
+            return hit
+        print("on EC2 but found no public address: set `host` in the dmobnk-branch ConfigMap", flush=True)
+    if private:
+        return private[0]
     ip = os.environ.get("NODE_IP", "").strip()
     return (ip, "node InternalIP") if ip else (None, None)
 
@@ -309,18 +379,21 @@ def ingress_class(current):
 def ingress_loop():
     if not os.path.exists(f"{SA}/token"):
         return
-    address, checked = None, 0.0
+    address, checked, ttl = None, 0.0, 0
     while True:
         try:
             host = os.environ.get("BRANCH_HOST", "").strip()
             if not host:
-                # Re-resolved every 5 minutes, so a wrong first answer (or a
-                # new public IP after a stop/start) doesn't stick.
-                if not address or time.time() - checked > 300:
-                    found, source = node_address()
+                # Re-resolved every 5 minutes once it's a public or published
+                # address; every 30 s while it's only a node's private address,
+                # since a cloud load balancer can take a minute or two to get
+                # its external address.
+                if not address or time.time() - checked > ttl:
+                    found, source = cluster_address()
                     if found and found != address:
                         print(f"using {source} {found}", flush=True)
                     address, checked = found or address, time.time()
+                    ttl = 30 if not found or source in ("node InternalIP", "node ExternalIP") else 300
                 host = f"branch.{address}.sslip.io" if address else None
             spec = k8s("GET", INGRESS)["spec"]
             ops = []
